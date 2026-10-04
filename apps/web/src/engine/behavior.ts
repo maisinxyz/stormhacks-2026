@@ -3,6 +3,7 @@
 // Each state is a generator "routine"; yielding a function means "call me each frame until I return true".
 import type { ActionStep, BusEvent, LocalIntent, Mode, Mood, RunEvent, Verb } from '@fetch/contracts';
 import { Animator, applyMood, MOODS, type Pose } from './anim';
+import type { Needs } from './needs';
 import type { Prop } from './props';
 import type { ParticleKind, SpeciesPack } from './species';
 
@@ -17,6 +18,9 @@ export interface BehaviorHost {
   setCarry(p?: Prop): void;
   setWorldProp(p?: Prop, x?: number, y?: number): void;
   peek(e: RunEvent): void; // edge-peek scene hook (1.9)
+  ball(): { x: number; y: number; resting: boolean; held: boolean } | undefined;
+  takeBall(): void;              // pet picked it up (shown as the carry prop)
+  dropBall(x: number, y: number): void;
 }
 
 type Step = (dt: number) => boolean;
@@ -39,9 +43,11 @@ export class Behavior {
   private stepIdx = 0;
   private approvalPending = false;
   private listening = false;
+  private fast = false;
+  private cursor?: { x: number; y: number; t: number };
   private animId = 0;
 
-  constructor(private pack: SpeciesPack, private host: BehaviorHost) {
+  constructor(private pack: SpeciesPack, private host: BehaviorHost, private needs: Needs) {
     this.start(this.idle(), 'idle');
   }
 
@@ -57,13 +63,14 @@ export class Behavior {
     const name = this.pack.intents[i];
     if (!name) return;
     const id = `intent-${++this.animId}`;
-    if (i === 'sleep') { this.start(this.sleepRoutine(), 'sleep'); return; }
+    if (i === 'sleep') { this.start(this.sleepRoutine(false), 'sleep'); return; }
     if (i === 'stop' || i === 'wake') { this.start(this.idle(), this.mode === 'play' ? 'play' : 'idle'); return; }
     if (i === 'come') { this.start(this.come(id), 'intent'); return; }
     this.start(this.intent(name, id, i === 'sit' || i === 'stay' || i === 'play_dead' || i === 'hide'), 'intent');
   }
 
   react(kind: 'pet' | 'poke' | 'feed') {
+    if (kind === 'pet' && this.state === 'reaction') return; // stroke events repeat; don't restart the clip
     if (this.state === 'exit' || this.state === 'working' || this.state === 'return' || this.state === 'approval') return;
     this.start(this.reaction(this.pack.reactions[kind]), 'reaction');
   }
@@ -118,6 +125,7 @@ export class Behavior {
       }
       if (this.step(dt)) this.step = undefined; else break;
     }
+    this.needs.tick(dt, this.state === 'sleep' ? 'sleep' : this.moving ? (this.fast ? 'run' : 'walk') : 'rest');
     const mood = MOODS[this.mood];
     const pose = applyMood(this.anim.update(dt * mood.speed * this.speedBias), this.mood);
     // face travel direction; idle poses are 3/4 view toward the camera
@@ -160,6 +168,7 @@ export class Behavior {
   private *walkTo(x: number, fast = false): Routine {
     const name = fast ? this.pack.locomotion.run : this.pack.locomotion.walk, c = this.pack.clips[name];
     this.playClip(name);
+    this.fast = fast;
     const spd = (c.move ?? 0.7) * MOODS[this.mood].speed;
     yield dt => {
       const d = x - this.x;
@@ -178,9 +187,13 @@ export class Behavior {
 
   private *idle(): Routine {
     this.targetY = 0; // y eases back down via update
-    this.mood = 'neutral';
     while (true) {
+      this.mood = this.base();
       if (this.listening) { yield* this.listen(); }
+      // zero energy auto-naps, only here (idle) so errands are never affected
+      if (this.needs.stats.energy <= 0) { yield* this.sleepRoutine(true); continue; }
+      if (this.needs.stats.energy < 25 && Math.random() < 0.4) { yield* this.play('yawn', undefined); continue; }
+      if (this.mode === 'play' && this.cursor && performance.now() - this.cursor.t < 3000 && (this.pack.id === 'cat' || this.pack.id === 'bird')) { yield* this.chaseCursor(); continue; }
       const { xmin, xmax } = this.host.bounds();
       const spots = this.host.platformSpots();
       if (this.mode === 'work' && spots.length && Math.random() < 0.55) {
@@ -200,6 +213,8 @@ export class Behavior {
       }
     }
   }
+
+  private base(): Mood { return this.needs.mood; }
 
   private pick(l: string[]) { return l[Math.floor(Math.random() * l.length)]; }
 
@@ -229,10 +244,14 @@ export class Behavior {
     yield* this.wait(c.loop ? 1.5 : c.dur);
   }
 
-  private *sleepRoutine(): Routine {
+  private *sleepRoutine(auto = false): Routine {
+    const prev = this.state;
+    this.state = 'sleep';
     this.mood = 'sleepy';
     this.playClip('sleep');
-    yield () => false; // wake/stop/intent starts a new routine
+    // manual sleep: until wake/stop/intent starts a new routine; auto-nap: until rested
+    yield () => auto && this.needs.stats.energy >= 60;
+    this.state = prev === 'sleep' ? 'idle' : prev;
   }
 
   // 1.5: compose base clips for a verb; mood scales pace via the animator; prop on carry socket or as a world billboard.
@@ -303,6 +322,83 @@ export class Behavior {
     this.host.emit({ type: 'RETURNED', runId: this.runId });
     yield* this.wait(5);
     this.host.setWorldProp(undefined);
-    this.mood = 'neutral';
+    this.mood = this.base();
+  }
+
+  // ---------- 1.8 interactions ----------
+  setCursor(x: number, y: number) {
+    const now = performance.now(), stale = !this.cursor || now - this.cursor.t >= 3000;
+    this.cursor = { x, y, t: now };
+    // cursor became active: restart idle so it notices (Play mode: laser dot / landing target)
+    if (stale && this.mode === 'play' && this.state === 'play' && (this.pack.id === 'cat' || this.pack.id === 'bird')) this.start(this.idle(), 'play');
+  }
+
+  pointTo(x: number) {
+    if (this.state === 'exit' || this.state === 'working' || this.state === 'return' || this.state === 'approval') return;
+    this.start(this.pointRoutine(x), 'intent');
+  }
+
+  private *pointRoutine(x: number): Routine {
+    yield* this.walkTo(x, Math.abs(x - this.x) > 1.5);
+    // dog/cat sniff or sit at the target; bird just settles
+    yield* this.play(this.pack.id === 'bird' ? 'perch' : this.pick(['sniff', 'sit']), rand(1.5, 3));
+  }
+
+  /** THROW: the dog chases the ball, picks it up, and brings it back to centre stage. Others just look. */
+  fetchBall() {
+    if (this.state === 'exit' || this.state === 'working' || this.state === 'return' || this.state === 'approval') return;
+    if (!this.pack.games.includes('ball_fetch')) { this.start(this.reaction(this.pack.listenClip), 'reaction'); return; }
+    this.start(this.fetchRoutine(), 'play');
+  }
+
+  private *fetchRoutine(): Routine {
+    this.mood = 'eager';
+    const t0 = performance.now();
+    this.playClip(this.pack.locomotion.run);
+    this.fast = true;
+    const spd = this.pack.clips[this.pack.locomotion.run].move! * MOODS.eager.speed;
+    yield dt => {
+      const b = this.host.ball();
+      if (!b || performance.now() - t0 > 20000) return true;
+      const d = b.x - this.x;
+      this.dir = d >= 0 ? 1 : -1;
+      if (!b.held && b.resting && Math.abs(d) < 0.2) return true;
+      this.moving = true;
+      this.x += Math.sign(d) * Math.min(Math.abs(d), spd * dt);
+      return false;
+    };
+    const b = this.host.ball();
+    if (!b || Math.abs(b.x - this.x) > 0.3) return; // gave up
+    yield* this.play('dig', 0.4);
+    this.host.takeBall();
+    this.setProp({ kind: 'preset', name: 'ball' });
+    this.needs.played(4);
+    yield* this.walkTo(0, true);
+    this.setProp(undefined);
+    this.host.dropBall(this.x + this.dir * 0.35, 0.1);
+    this.host.emit({ type: 'ANIM_DONE', id: 'fetch_ball' });
+    yield* this.play('wag', 1.5);
+  }
+
+  /** Cat chases the laser dot; bird lands on the cursor target. */
+  private *chaseCursor(): Routine {
+    this.mood = 'eager';
+    yield dt => {
+      const c = this.cursor;
+      if (!c || performance.now() - c.t > 3000 || this.mode !== 'play') return true;
+      const d = c.x - this.x;
+      this.dir = d >= 0 ? 1 : -1;
+      if (Math.abs(d) < 0.12) {
+        if (this.pack.id === 'bird') this.targetY = Math.max(0, c.y - 0.1); // land on the cursor
+        if (this.anim.clip !== this.pack.clips[this.pack.id === 'cat' ? 'bat' : 'perch']) this.playClip(this.pack.id === 'cat' ? 'bat' : 'perch');
+        return false;
+      }
+      const run = Math.abs(d) > 0.6, name = run ? this.pack.locomotion.run : this.pack.locomotion.walk, cl = this.pack.clips[name];
+      if (this.anim.clip !== cl) this.playClip(name);
+      this.fast = run; this.moving = true;
+      this.targetY = this.pack.id === 'bird' ? Math.max(0, c.y - 0.1) : 0;
+      this.x += Math.sign(d) * Math.min(Math.abs(d), (cl.move ?? 0.7) * MOODS.eager.speed * dt);
+      return false;
+    };
   }
 }

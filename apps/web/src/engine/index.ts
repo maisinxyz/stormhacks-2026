@@ -3,8 +3,11 @@ import type { ActionStep, BusEvent, LocalIntent, Mode, Mood, PetBundle, PetEngin
 import { Bus } from './bus';
 import { generatePet as runPipeline } from './pipeline/generate';
 import { Behavior, type BehaviorHost } from './behavior';
+import { Interactions } from './interactions';
+import { Needs, type Stats } from './needs';
+import { Toys } from './toys';
 import { Props, type Prop } from './props';
-import { PACKS, type SpeciesPack } from './species';
+import { PACKS, type FeedItem, type SpeciesPack } from './species';
 import { MAX_BONES, SplatMesh } from './splatRenderer';
 
 interface Bone { name: string; parent: number; head: [number, number, number]; tail: [number, number, number] }
@@ -33,6 +36,16 @@ export class Engine implements PetEngine {
   private pack?: SpeciesPack;
   private props?: Props;
   private listeningPending = false;
+  private needs?: Needs;
+  private toys?: Toys;
+  private inter?: Interactions;
+  private ring?: THREE.Sprite;
+  private ringP = -1;
+  private laser?: THREE.Sprite;
+  private cursorAt?: { x: number; y: number; t: number };
+  private approvalPending = false;
+  private approvalActionId = '';
+  private statsCb?: (s: Stats) => void;
 
   private bus = new Bus();
   private renderer!: THREE.WebGLRenderer;
@@ -54,9 +67,14 @@ export class Engine implements PetEngine {
     this.shadow = this.makeShadow();
     this.scene.add(this.shadow);
     this.props = new Props(this.scene);
+    this.toys = new Toys(this.scene);
+    this.toys.init().then(() => this.syncToyPlatforms());
+    this.ring = this.makeRing();
+    this.laser = this.makeLaser();
+    this.inter = new Interactions(this.interactionHost());
     canvas.style.pointerEvents = 'none';
     window.addEventListener('pointermove', e => {
-      canvas.style.pointerEvents = this.hitTest(e.clientX, e.clientY) ? 'auto' : 'none';
+      canvas.style.pointerEvents = this.hitTest(e.clientX, e.clientY) || this.hitBall(e.clientX, e.clientY) ? 'auto' : 'none';
     });
     let prev = 0;
     const loop = (t: number) => {
@@ -65,6 +83,9 @@ export class Engine implements PetEngine {
       this.raf = requestAnimationFrame(loop);
       this.resize();
       this.onFrame?.(t / 1000);
+      this.toys?.step(Math.min(dt, 0.1));
+      this.inter?.update(Math.min(dt, 0.1), t);
+      this.updateLaser();
       if (this.splat) {
         if (this.beh) this.tickBehavior(Math.min(dt, 0.1));
         this.skin();
@@ -92,7 +113,8 @@ export class Engine implements PetEngine {
     this.splat.setBudget(BUDGET[this.quality]);
     this.scene.add(this.splat.mesh);
     this.pack = PACKS[b.species];
-    this.beh = new Behavior(this.pack, this.host());
+    this.needs = new Needs(b.stats, s => this.statsCb?.(s));
+    this.beh = new Behavior(this.pack, this.host(), this.needs);
     this.beh.setMode(this.mode);
     if (this.listeningPending) this.beh.setListening(true);
   }
@@ -138,7 +160,100 @@ export class Engine implements PetEngine {
       setCarry: p => this.props?.setCarry(p),
       setWorldProp: (p, x, y) => this.props?.setWorld(p, x === undefined ? undefined : new THREE.Vector3(x, y ?? 0, 0.2)),
       peek: e => this.peekEvents.push(e), // TODO 1.9: render in the edge-peek canvas
+      ball: () => this.toys?.present ? { ...this.toys.pos, resting: this.toys.resting, held: this.toys.held } : undefined,
+      takeBall: () => this.toys?.take(),
+      dropBall: (x, y) => this.toys?.drop(x, y),
     };
+  }
+
+  // ---- 1.8 pointer interactions: host glue ----
+  private interactionHost() {
+    return {
+      hitPet: (x: number, y: number) => this.hitTest(x, y),
+      hitBall: (x: number, y: number) => this.hitBall(x, y),
+      toWorld: (x: number, y: number) => this.toWorld(x, y),
+      emit: (e: BusEvent) => this.bus.emit(e),
+      react: (k: 'pet' | 'poke' | 'feed') => this.beh?.react(k),
+      petted: (i: number, dt: number) => this.needs?.petted(i, dt),
+      feed: (item: FeedItem) => this.feedItem(item),
+      holdBall: (x: number, y: number) => this.toys?.hold(x, y),
+      releaseBall: (vx: number, vy: number) => { this.toys?.release(vx, vy); this.beh?.fetchBall(); },
+      point: (x: number) => this.beh?.pointTo(x),
+      cursor: (x: number, y: number) => { this.cursorAt = { x, y, t: performance.now() }; this.beh?.setCursor(x, y); },
+      approval: () => ({ pending: this.approvalPending, actionId: this.approvalActionId }),
+      setRing: (p: number) => this.setRing(p),
+      mode: () => this.mode,
+    };
+  }
+
+  private hitBall(x: number, y: number) {
+    if (!this.toys?.hittable) return false;
+    const w = this.toWorld(x, y), b = this.toys.pos;
+    return !!w && Math.hypot(w.x - b.x, w.y - b.y) < 0.2;
+  }
+
+  /** Species food check; wrong food is ignored. Resets hunger. */
+  feedItem(item: FeedItem) {
+    if (!this.pack?.foods.includes(item)) return false;
+    this.needs?.fed();
+    return true;
+  }
+
+  /** F2 Toy Box: put the ball on stage (optionally with a toss). */
+  spawnBall(x = -1, y = 1.2, vx = 0, vy = 0) { this.toys?.spawn(x, y); if (vx || vy) { this.toys?.release(vx, vy); this.beh?.fetchBall(); } }
+  /** F2 treat tray (non-HTML5 drag): call on pointer-up over the canvas. */
+  dropFood(item: FeedItem, x: number, y: number) { return this.inter?.dropFood(item, x, y) ?? false; }
+  /** F2 POINT (screen px). */
+  pointAt(x: number, y: number) { this.inter?.point(x, y); }
+  /** Stat changes for F2 to persist via PATCH /pets/:id (not in the frozen BusEvent contract). */
+  onStats(cb: (s: Stats) => void) { this.statsCb = cb; }
+  get stats() { return this.needs?.stats; }
+
+  private syncToyPlatforms() {
+    if (!this.toys || !this.renderer) return;
+    const b = this.host().bounds();
+    this.toys.setPlatforms(this.platforms.filter(p => p.kind !== 'edge').flatMap(p => {
+      const l = this.toWorld(p.x, p.y), r = this.toWorld(p.x + p.w, p.y);
+      return l && r ? [{ x: (l.x + r.x) / 2, y: Math.max(0, l.y), w: Math.abs(r.x - l.x) }] : [];
+    }), b);
+  }
+
+  // Ring above the pet that fills during a pet-to-approve stroke.
+  private makeRing() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const m = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false });
+    const s = new THREE.Sprite(m);
+    s.scale.setScalar(0.45); s.renderOrder = 12; s.visible = false;
+    this.scene.add(s);
+    return s;
+  }
+  private setRing(p: number) {
+    if (!this.ring || p === this.ringP) return;
+    this.ringP = p;
+    this.ring.visible = p > 0;
+    const m = this.ring.material, c = m.map!.image as HTMLCanvasElement, x = c.getContext('2d')!;
+    x.clearRect(0, 0, 128, 128);
+    x.lineWidth = 12; x.strokeStyle = 'rgba(0,0,0,0.15)'; x.beginPath(); x.arc(64, 64, 50, 0, Math.PI * 2); x.stroke();
+    x.strokeStyle = '#2f9e44'; x.lineCap = 'round'; x.beginPath(); x.arc(64, 64, 50, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); x.stroke();
+    m.map!.needsUpdate = true;
+  }
+
+  private makeLaser() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 32;
+    const x = c.getContext('2d')!, g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, 'rgba(255,40,40,1)'); g.addColorStop(0.4, 'rgba(255,40,40,0.8)'); g.addColorStop(1, 'rgba(255,40,40,0)');
+    x.fillStyle = g; x.fillRect(0, 0, 32, 32);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false }));
+    s.scale.setScalar(0.12); s.renderOrder = 11; s.visible = false;
+    this.scene.add(s);
+    return s;
+  }
+  private updateLaser() {
+    const c = this.cursorAt, on = !!c && this.mode === 'play' && (this.pack?.id === 'cat' || this.pack?.id === 'bird') && performance.now() - c.t < 3000;
+    if (this.laser) { this.laser.visible = on; if (on) this.laser.position.set(c!.x, c!.y, 0.2); }
+    if (this.ring && this.ring.visible && this.splat) this.ring.position.set(this.splat.mesh.position.x, this.splat.mesh.position.y + 1.25, 0.3);
   }
   /** Run events seen while the pet is off-canvas; the edge-peek scene (1.9) consumes these. */
   peekEvents: RunEvent[] = [];
@@ -195,7 +310,7 @@ export class Engine implements PetEngine {
     return this.bones.some((b, i) => {
       const len = new THREE.Vector3(...b.head).distanceTo(new THREE.Vector3(...b.tail));
       const a = new THREE.Vector3(...b.head).applyMatrix4(this.boneWorld[i]), e = new THREE.Vector3(...b.tail).applyMatrix4(this.boneWorld[i]);
-      return rayHitsCapsule(ray.ray.origin, ray.ray.direction, a, e, Math.max(0.07, 0.2 * len));
+      return rayHitsCapsule(ray.ray.origin, ray.ray.direction, a, e, Math.max(0.14, 0.3 * len));
     });
   }
 
@@ -227,12 +342,23 @@ export class Engine implements PetEngine {
 
   // --- PetEngine surface; F1 slice 0-5h implements loading/skinning only. TODOs land in later slices. ---
   setMode(mode: Mode) { this.mode = mode; this.beh?.setMode(mode); }
-  setPlatforms(p: Platform[]) { this.platforms = p; }
+  setPlatforms(p: Platform[]) { this.platforms = p; this.syncToyPlatforms(); }
   runPlan(steps: ActionStep[]) { this.peekEvents = []; this.beh?.runPlan(steps); }
-  pushToolEvent(e: RunEvent) { this.beh?.pushToolEvent(e); }
+  pushToolEvent(e: RunEvent) {
+    if (e.type === 'approval.required') this.approvalActionId = e.actionId;
+    this.beh?.pushToolEvent(e);
+  }
   showResult(prop: ActionStep['prop'], mood: Mood) { this.beh?.showResult(prop, mood); }
-  setApprovalPending(pending: boolean) { this.beh?.setApprovalPending(pending); }
-  doIntent(i: LocalIntent) { this.beh?.doIntent(i); }
+  setApprovalPending(pending: boolean) { this.approvalPending = pending; this.beh?.setApprovalPending(pending); }
+  doIntent(i: LocalIntent) {
+    if (i === 'fetch_ball' && this.pack?.games.includes('ball_fetch')) {
+      // "fetch the ball": toss a ball on stage and chase it
+      const b = this.host().bounds();
+      this.spawnBall(b.xmin + 0.5, 1, 4, 3);
+      return;
+    }
+    this.beh?.doIntent(i);
+  }
   setSpeaking(_amplitude: number) { /* TODO */ }
   generatePet(input: { kind: 'photo' | 'drawing'; image: Blob; species: Species; name: string },
               onProgress: (p: { stage: string; pct: number }) => void): Promise<PetBundle> {

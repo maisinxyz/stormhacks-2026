@@ -11,7 +11,7 @@ let last = 0, frames = 0, acc = 0;
 
 engine.onFrame = t => {
   frames++; acc += t - last; last = t;
-  if (acc > 1) { fps.textContent = `${(frames / acc).toFixed(0)} fps | ${engine.state}`; frames = 0; acc = 0; }
+  if (acc > 1) { const st = engine.stats; fps.textContent = `${(frames / acc).toFixed(0)} fps | ${engine.state}` + (st ? ` | E${st.energy.toFixed(0)} H${st.happiness.toFixed(0)} U${st.hunger.toFixed(0)}` : ''); frames = 0; acc = 0; }
 };
 
 engine.mount(document.getElementById('pet') as HTMLCanvasElement, document.getElementById('peek') as HTMLCanvasElement);
@@ -63,3 +63,10 @@ engine.setPlatforms([{ id: 'win1', x: innerWidth * 0.55, y: innerHeight * 0.45, 
 engine.on('PET_AT_PLATFORM', e => console.log('perched', e.platformId));
 engine.on('RETURNED', e => console.log('returned', e.runId));
 engine.on('ANIM_DONE', e => console.log('anim done', e.id));
+
+btn('ball', () => engine.spawnBall(-1, 1.2));
+btn('feed treat', () => console.log('fed', engine.feedItem('treat'))); btn('feed seed', () => console.log('fed', engine.feedItem('seed')));
+engine.on('PET_STROKE', e => console.log('stroke', e.intensity.toFixed(2)));
+engine.on('POKE', () => console.log('poke')); engine.on('THROW', e => console.log('throw', e.vx.toFixed(1), e.vy.toFixed(1)));
+engine.on('POINT', e => console.log('point', e.x.toFixed(2))); engine.on('APPROVE', e => console.log('APPROVE', e.actionId));
+engine.onStats(s => console.log('stats', JSON.stringify(s)));

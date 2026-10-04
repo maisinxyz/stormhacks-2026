@@ -7,7 +7,7 @@ export type Prop = NonNullable<ActionStep['prop']>;
 
 const PRESET: Record<string, string> = {
   envelope: '✉️', document: '📄', folder: '📁', magnifier: '🔍', keyboard: '⌨️', pencil: '✏️',
-  calendar: '📅', phone: '📱', coin: '🪙', box: '📦',
+  calendar: '📅', phone: '📱', coin: '🪙', box: '📦', ball: '🎾',
 };
 const texCache = new Map<string, THREE.Texture>();
 

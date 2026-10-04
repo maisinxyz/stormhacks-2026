@@ -20,6 +20,7 @@ const clips: Record<string, Clip> = {
   danceBob: clip(0.7, true, p => P({ head: [sw(p * 2, 0.3), sw(p, 0.4), 0], root: [0, 0, sw(p, 0.2)], tail: [0, sw(p, 0.6), 0], ...wings(0.1 + sw(p, 0.2), -0.1 - sw(p, 0.2)) }, Math.abs(sw(p, 0.07)))),
   whistle: clip(1.6, true, p => P({ head: [-0.35 + sw(p * 3, 0.08), 0, 0.1], ...wings(0.25, -0.25), tail: [0, 0, 0.25] }, 0.02)),
   droop: clip(2, true, (_p, t) => { const e = ease(t, 0.5); return P({ head: [0.7 * e, 0, 0], ...wings(-0.6 * e), tail: [-0.5 * e, 0, 0] }, -0.05 * e); }),
+  yawn: clip(1.6, false, p => { const k = Math.sin(Math.min(1, p) * Math.PI); return P({ head: [-0.6 * k, 0, 0], ...wings(0.35 * k, -0.35 * k) }); }),
   peck: clip(0.45, true, p => P({ head: [0.9 * Math.max(0, sw(p, 1)), 0, 0], root: [0.2, 0, 0], ...wings(-0.1) })),
   sleep: clip(4, true, (p, t) => { const e = ease(t, 0.6); return P({ head: [0.2 * e, 2.6 * e, 0], ...wings(-0.4 * e), root: [sw(p, 0.02), 0, 0] }, -0.06 * e); }),
   spinTurn: clip(1, false, p => P({ ...flap(p * 3, 0.5, 0.3) }, 0.05, p * TAU)),
