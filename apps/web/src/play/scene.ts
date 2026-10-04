@@ -1,38 +1,361 @@
 import * as THREE from 'three';
 
-export const ROOM_TOKENS = { floor: 0xb8b7af, wall: 0xd8d2c8, trim: 0xb4aa9d, rug: 0x8f9d99, bed: 0x687b80, fabric: 0xd7ded1, wood: 0x27272a, green: 0x5f805c, brass: 0x9b8b76, light: 0xffe7b3 };
-const ROOM = { width: 11, depth: 8, height: 3.6 };
-const mat = (color: number, roughness = .86) => new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
-function box(scene: THREE.Scene, size: [number, number, number], position: [number, number, number], color: number, name: string, material: THREE.Material = mat(color)) { const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material); mesh.position.set(...position); mesh.name = name; scene.add(mesh); return mesh; }
-function cylinder(scene: THREE.Scene, radius: number, height: number, position: [number, number, number], color: number, name: string, segments = 32) { const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, segments), mat(color)); mesh.position.set(...position); mesh.name = name; scene.add(mesh); return mesh; }
+export const ROOM_SPEC = {
+  scale: 1,
+  room: { width: 11, depth: 8, height: 2.6, wall: 0.14, floor: 0.12 },
+  clearance: { wallGap: 0.03, walk: 0.9, doorSwing: 0.8, cribAccess: 0.65, cameraWall: 0.5, cameraFloor: 0.45, cameraCeiling: 0.65 },
+  palette: {
+    wall: 0xbdb4a8, floor: 0xc9c6c1, trim: 0x82796f, metal: 0x1a1a1a,
+    oatmeal: 0xd6cbb9, cream: 0xe8e1d5, taupe: 0xa89a89, paleGray: 0xd0d0cd,
+    wood: 0x877564, plant: 0x526c4d, pot: 0x9d8d7c, glass: 0xa8c5cb,
+    light: 0xffd6a1, artA: 0xc88e73, artB: 0x839c94, artC: 0xd5bd91,
+  },
+  materials: { wallRoughness: 0.92, floorRoughness: 0.58, metalness: 0.8, metalRoughness: 0.42, fabricRoughness: 0.96 },
+  floor: { plankWidth: 0.17, plankLength: 1.8, joint: 0.012 },
+  door: { width: 0.9, height: 2.05 },
+  window: { width: 1.6, height: 1.3, sill: 0.9, x: 0, z: -3.98 },
+  play: { minX: -0.9, maxX: 5.2, minZ: -2.8, maxZ: 3.0 },
+  furniture: {
+    crib: { x: -4.0, z: 3.55, length: 1.4, width: 0.72, height: 0.95 },
+    dogBed: { x: 4.55, z: 3.55, length: 1.0, width: 0.7, height: 0.16 },
+    sofa: { x: -2.3, z: 0, width: 2.1, depth: 0.9, height: 0.85, seat: 0.45 },
+    console: { x: -5.22, z: 0, width: 1.7, depth: 0.42, height: 0.5 },
+    tv: { x: -5.39, z: 0, width: 1.38, height: 0.78, centerY: 1.18 },
+    shelf: { x: -5.23, z: -1.9, width: 0.9, depth: 0.32, height: 1.75 },
+    chandelier: { x: 2.0, z: 0, bottom: 2.22 },
+    feeder: { x: 5.2, z: 3.15, radius: 0.13 },
+    water: { x: 5.25, z: 3.55, radius: 0.16, height: 0.62 },
+  },
+} as const;
 
-function floorTexture() { const canvas = document.createElement('canvas'); canvas.width = canvas.height = 512; const x = canvas.getContext('2d')!; x.fillStyle = '#b8b7af'; x.fillRect(0, 0, 512, 512); for (let y = 0; y < 512; y += 48) { x.fillStyle = y % 96 ? '#c0bfb8' : '#aaa9a2'; x.fillRect(0, y, 512, 46); x.strokeStyle = 'rgba(55,55,50,.2)'; x.beginPath(); x.moveTo(0, y + 46); x.lineTo(512, y + 46); x.stroke(); for (let seam = (y / 48 % 2) * 120; seam < 512; seam += 240) { x.beginPath(); x.moveTo(seam, y); x.lineTo(seam, y + 46); x.stroke(); } } const texture = new THREE.CanvasTexture(canvas); texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(1.2, 1); return texture; }
-function fabricTexture(color: string, accent: string) { const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128; const x = canvas.getContext('2d')!; x.fillStyle = color; x.fillRect(0, 0, 128, 128); x.strokeStyle = accent; x.globalAlpha = .2; for (let i = -128; i < 256; i += 16) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i + 128, 128); x.stroke(); } return new THREE.CanvasTexture(canvas); }
-function addWindow(scene: THREE.Scene) { const glass = new THREE.MeshBasicMaterial({ color: 0x9fc5cf, transparent: true, opacity: .72 }); box(scene, [2.7, 1.55, .04], [0, 2.15, -3.94], 0, 'window-glass', glass); box(scene, [2.9, .09, .1], [0, 2.97, -3.88], ROOM_TOKENS.trim, 'window-top'); box(scene, [2.9, .09, .1], [0, 1.33, -3.88], ROOM_TOKENS.trim, 'window-sill'); box(scene, [.1, 1.7, .1], [-1.38, 2.15, -3.88], ROOM_TOKENS.trim, 'window-frame'); box(scene, [.1, 1.7, .1], [1.38, 2.15, -3.88], ROOM_TOKENS.trim, 'window-frame'); box(scene, [.07, 1.55, .07], [0, 2.15, -3.87], ROOM_TOKENS.trim, 'window-mullion'); box(scene, [2.65, .06, .08], [0, 2.15, -3.86], ROOM_TOKENS.trim, 'window-mullion'); box(scene, [.24, 1.8, .05], [-1.58, 2.15, -3.84], 0xdcb5a0, 'curtain-left'); box(scene, [.24, 1.8, .05], [1.58, 2.15, -3.84], 0xdcb5a0, 'curtain-right'); }
-function addPlant(scene: THREE.Scene, x: number, z: number) { cylinder(scene, .3, .35, [x, .18, z], 0xc17b55, 'plant-pot'); for (const [dx, dy, dz, scale] of [[-.22, .62, 0, .55], [.2, .72, .05, .62], [0, .92, -.05, .5], [.34, .55, -.08, .42]] as const) { const leaf = new THREE.Mesh(new THREE.SphereGeometry(.35, 16, 10), mat(ROOM_TOKENS.green)); leaf.scale.set(scale, 1.5 * scale, .35 * scale); leaf.position.set(x + dx, dy, z + dz); leaf.rotation.z = dx * 1.5; scene.add(leaf); } }
-function addLamp(scene: THREE.Scene, x: number, z: number) { cylinder(scene, .035, 1.25, [x, .68, z], ROOM_TOKENS.brass, 'lamp-stem'); cylinder(scene, .28, .12, [x, .05, z], ROOM_TOKENS.brass, 'lamp-base'); const shade = new THREE.Mesh(new THREE.ConeGeometry(.32, .3, 24, 1, true), mat(0xe8c68f)); shade.position.set(x, 1.38, z); scene.add(shade); const light = new THREE.PointLight(0xffd28a, 2.1, 5); light.position.set(x, 1.3, z); scene.add(light); }
-function addFeedingStation(scene: THREE.Scene) { const metal = new THREE.MeshStandardMaterial({ color: 0xb8c2c2, roughness: .25, metalness: .82 }); const bowl = new THREE.Mesh(new THREE.CylinderGeometry(.31, .24, .12, 32, 1, true), metal); bowl.position.set(4.05, .1, -2.7); bowl.name = 'metal-dog-feeder'; scene.add(bowl); const waterBase = new THREE.Mesh(new THREE.CylinderGeometry(.28, .3, .12, 24), metal); waterBase.position.set(4.7, .06, -2.7); waterBase.name = 'water-dispenser-base'; scene.add(waterBase); const bottle = new THREE.Mesh(new THREE.CylinderGeometry(.16, .2, .65, 24), new THREE.MeshStandardMaterial({ color: 0x8fc2c8, transparent: true, opacity: .72, roughness: .15, metalness: .1 })); bottle.position.set(4.7, .42, -2.7); bottle.name = 'water-dispenser'; scene.add(bottle); }
-function addCouch(scene: THREE.Scene) { const fabric = new THREE.MeshStandardMaterial({ map: fabricTexture('#8b756b', '#c9b3a4'), roughness: 1 }); box(scene, [2.6, .35, .92], [3.55, .32, .75], 0, 'couch-seat', fabric); box(scene, [2.6, 1.05, .22], [3.55, .78, 1.2], 0, 'couch-back', fabric); box(scene, [.22, .62, 1], [2.3, .56, .75], 0, 'couch-arm-left', fabric); box(scene, [.22, .62, 1], [4.8, .56, .75], 0, 'couch-arm-right', fabric); box(scene, [.7, .13, .52], [2.95, .57, .55], 0, 'couch-cushion', new THREE.MeshStandardMaterial({ color: 0xb19d8c, roughness: 1 })); box(scene, [.7, .13, .52], [4.05, .57, .55], 0, 'couch-cushion', new THREE.MeshStandardMaterial({ color: 0xb19d8c, roughness: 1 })); box(scene, [.8, .12, .55], [1.75, .5, .75], ROOM_TOKENS.wood, 'couch-side-table'); cylinder(scene, .06, .48, [1.75, .74, .75], ROOM_TOKENS.brass, 'table-leg'); }
-function addStairs(scene: THREE.Scene) { const dark = new THREE.MeshStandardMaterial({ color: 0x27383a, roughness: 1 }); box(scene, [1.7, 2.2, .08], [-4.45, 1.72, -3.91], 0, 'upstairs-opening', dark); for (let i = 0; i < 8; i++) box(scene, [1.65, .16 + i * .045, .52], [-4.25, .08 + i * .12, -1.3 - i * .34], ROOM_TOKENS.wood, 'stair-step'); box(scene, [2.1, .16, 1.85], [-4.15, 1.08, -3.2], ROOM_TOKENS.wood, 'upstairs-landing'); box(scene, [.08, .78, 1.75], [-5.13, 1.52, -3.2], ROOM_TOKENS.brass, 'upstairs-railing'); box(scene, [.08, .78, 1.75], [-3.17, 1.52, -3.2], ROOM_TOKENS.brass, 'upstairs-railing'); box(scene, [1.95, .08, .08], [-4.15, 1.9, -3.2], ROOM_TOKENS.brass, 'upstairs-railing'); const haze = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.55), new THREE.MeshBasicMaterial({ color: 0xb5c7b0, transparent: true, opacity: .12, side: THREE.DoubleSide })); haze.position.set(-4.45, 2.55, -3.88); scene.add(haze); }
-function addPainting(scene: THREE.Scene, x: number, y: number, z: number, color: number, side = false) { const frame = side ? [0.08, .85, 1.15] as [number, number, number] : [1.25, .85, .08] as [number, number, number]; const canvas = side ? [.04, .68, .98] as [number, number, number] : [1.04, .68, .04] as [number, number, number]; box(scene, frame, [x, y, z], ROOM_TOKENS.wood, 'painting-frame'); box(scene, canvas, [x + (side ? -.045 : 0), y, z + (side ? 0 : .045)], color, 'painting'); }
-function addTV(scene: THREE.Scene) { box(scene, [.08, 1.15, 2.05], [3.91, 1.82, -1.1], 0x182329, 'wall-mounted-tv'); box(scene, [.04, .95, 1.82], [3.855, 1.82, -1.1], 0x3d6871, 'tv-screen'); box(scene, [.7, .06, .08], [3.82, 1.18, -1.1], 0x1a2629, 'tv-console'); }
-function addFloorToys(scene: THREE.Scene) { cylinder(scene, .13, .08, [.85, .08, 1.25], 0xd25e54, 'floor-toy-ball'); cylinder(scene, .09, .09, [-.72, .09, -.72], 0xe0b34f, 'floor-toy-ball'); const bone = box(scene, [.62, .1, .17], [1.15, .09, .55], 0xe6d5b4, 'floor-toy-bone'); bone.rotation.y = -.35; }
-function addFrontEntry(scene: THREE.Scene) { const z = 3.94; box(scene, [3.7, ROOM.height, .14], [-3.65, ROOM.height / 2, z], ROOM_TOKENS.wall, 'front-wall-left'); box(scene, [3.7, ROOM.height, .14], [3.65, ROOM.height / 2, z], ROOM_TOKENS.wall, 'front-wall-right'); box(scene, [3.6, 1.35, .14], [0, 2.93, z], ROOM_TOKENS.wall, 'front-wall-lintel'); box(scene, [.12, 2.25, .18], [-1.82, 1.13, z - .02], ROOM_TOKENS.trim, 'entry-trim-left'); box(scene, [.12, 2.25, .18], [1.82, 1.13, z - .02], ROOM_TOKENS.trim, 'entry-trim-right'); box(scene, [3.5, .08, 1.9], [0, 1.03, 5.35], ROOM_TOKENS.wall, 'hallway-back'); box(scene, [.12, 2.2, 2.7], [-1.8, 1.1, 4.75], ROOM_TOKENS.wall, 'hallway-left'); box(scene, [.12, 2.2, 2.7], [1.8, 1.1, 4.75], ROOM_TOKENS.wall, 'hallway-right'); }
-function addCrib(scene: THREE.Scene) { const dark = new THREE.MeshStandardMaterial({ color: 0x242629, roughness: .6, metalness: .1 }); box(scene, [1.8, .16, 1.05], [-4.15, .72, .9], 0, 'crib-mattress', new THREE.MeshStandardMaterial({ color: 0xc9c4ba, roughness: 1 })); box(scene, [1.95, .85, .08], [-4.15, .42, .38], 0, 'crib-headboard', dark); box(scene, [1.95, .85, .08], [-4.15, .42, 1.42], 0, 'crib-footboard', dark); for (const x of [-4.95, -4.65, -4.35, -4.05, -3.75, -3.45]) { cylinder(scene, .025, .85, [x, .95, .38], 0x242629, 'crib-rail', 12); cylinder(scene, .025, .85, [x, .95, 1.42], 0x242629, 'crib-rail', 12); } }
-function addChandelier(scene: THREE.Scene) { cylinder(scene, .035, .6, [0, 3.25, .2], ROOM_TOKENS.brass, 'chandelier-stem'); const ring = new THREE.Mesh(new THREE.TorusGeometry(.48, .055, 10, 32), new THREE.MeshStandardMaterial({ color: 0x4b4b4a, roughness: .3, metalness: .7 })); ring.position.set(0, 2.92, .2); ring.rotation.x = Math.PI / 2; scene.add(ring); for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; cylinder(scene, .04, .42, [Math.cos(a) * .34, 2.78, .2 + Math.sin(a) * .34], 0x4b4b4a, 'chandelier-arm', 12); } }
+const P = ROOM_SPEC.palette;
+const R = ROOM_SPEC.room;
+const F = ROOM_SPEC.furniture;
+const MAT = ROOM_SPEC.materials;
+const FLOOR_TOP = 0;
+const roomMaterial = (color: number, roughness: number = MAT.wallRoughness, metalness: number = 0) =>
+  new THREE.MeshStandardMaterial({ color, roughness, metalness });
+
+function box(scene: THREE.Scene, name: string, size: [number, number, number], position: [number, number, number], material: THREE.Material) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+  mesh.name = name;
+  mesh.position.set(...position);
+  scene.add(mesh);
+  return mesh;
+}
+
+function cylinder(scene: THREE.Scene, name: string, radius: number, height: number, position: [number, number, number], material: THREE.Material, segments = 20) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, segments), material);
+  mesh.name = name;
+  mesh.position.set(...position);
+  scene.add(mesh);
+  return mesh;
+}
+
+function plankTexture() {
+  const pixelsPerMeter = 100;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(R.width * pixelsPerMeter);
+  canvas.height = Math.ceil(R.depth * pixelsPerMeter);
+  const ctx = canvas.getContext('2d')!;
+  const plankPx = ROOM_SPEC.floor.plankWidth * pixelsPerMeter;
+  const lengthPx = ROOM_SPEC.floor.plankLength * pixelsPerMeter;
+  const gapPx = ROOM_SPEC.floor.joint * pixelsPerMeter;
+  const colors = ['#c9c6c1', '#c5c3be', '#cecbc6', '#c7c5c0', '#cbc8c3'];
+  for (let row = 0, y = 0; y < canvas.height; row++, y += plankPx) {
+    const offset = row % 2 ? lengthPx * 0.48 : 0;
+    for (let x = -offset, index = 0; x < canvas.width; x += lengthPx, index++) {
+      ctx.fillStyle = colors[(row * 3 + index * 2) % colors.length];
+      ctx.fillRect(x + gapPx / 2, y + gapPx / 2, lengthPx - gapPx, plankPx - gapPx);
+      ctx.strokeStyle = 'rgba(104, 99, 92, 0.12)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + gapPx / 2, y + gapPx / 2, lengthPx - gapPx, plankPx - gapPx);
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.beginPath();
+      ctx.moveTo(x + gapPx, y + plankPx * 0.28);
+      ctx.lineTo(x + lengthPx - gapPx, y + plankPx * 0.28);
+      ctx.stroke();
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function addWindow(scene: THREE.Scene) {
+  const { width, height, sill, x, z } = ROOM_SPEC.window;
+  const midY = sill + height / 2;
+  const glass = new THREE.MeshBasicMaterial({ color: P.glass, transparent: true, opacity: 0.45 });
+  const trim = roomMaterial(P.cream, 0.8);
+  box(scene, 'window-glazing', [width, height, 0.035], [x, midY, z], glass);
+  box(scene, 'window-sill', [width + 0.16, 0.06, 0.15], [x, sill, z + 0.12], trim);
+  for (const side of [-1, 1]) box(scene, 'window-jamb', [0.055, height + 0.1, 0.09], [x + side * width / 2, midY, z + 0.1], trim);
+  box(scene, 'window-head', [width + 0.1, 0.055, 0.09], [x, sill + height, z + 0.1], trim);
+  box(scene, 'window-mullion', [0.035, height, 0.04], [x, midY, z + 0.12], trim);
+  box(scene, 'window-crossbar', [width, 0.035, 0.04], [x, midY, z + 0.12], trim);
+}
+
+function addBaseboards(scene: THREE.Scene) {
+  const trim = roomMaterial(P.trim, 0.8);
+  box(scene, 'baseboard-back', [R.width, 0.12, 0.035], [0, 0.06, -R.depth / 2 + R.wall / 2 + 0.018], trim);
+  box(scene, 'baseboard-left', [0.035, 0.12, R.depth], [-R.width / 2 + R.wall / 2 + 0.018, 0.06, 0], trim);
+  box(scene, 'baseboard-right', [0.035, 0.12, R.depth], [R.width / 2 - R.wall / 2 - 0.018, 0.06, 0], trim);
+  const doorLeft = -ROOM_SPEC.door.width / 2;
+  const doorRight = ROOM_SPEC.door.width / 2;
+  for (const x of [doorLeft, doorRight]) box(scene, 'door-casing', [0.06, ROOM_SPEC.door.height, 0.06], [x, ROOM_SPEC.door.height / 2, R.depth / 2 - R.wall / 2], trim);
+  box(scene, 'door-head-casing', [ROOM_SPEC.door.width + 0.12, 0.06, 0.06], [0, ROOM_SPEC.door.height, R.depth / 2 - R.wall / 2], trim);
+}
+
+function addPlant(scene: THREE.Scene, x: number, z: number, scale = 1) {
+  const potHeight = 0.28 * scale;
+  const potRadius = 0.17 * scale;
+  const foliage = roomMaterial(P.plant, 0.9);
+  const pot = roomMaterial(P.pot, 0.82);
+  cylinder(scene, 'plant-pot', potRadius, potHeight, [x, potHeight / 2, z], pot);
+  for (const [dx, dy, dz, sx, sy, sz] of [
+    [-0.2, 0.58, 0, 0.16, 0.43, 0.12], [0.17, 0.68, 0.04, 0.18, 0.49, 0.13],
+    [-0.04, 0.89, -0.03, 0.17, 0.45, 0.12], [0.24, 0.53, -0.08, 0.14, 0.36, 0.11],
+  ] as const) {
+    const leaf = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), foliage);
+    leaf.scale.set(sx * scale, sy * scale, sz * scale);
+    leaf.position.set(x + dx * scale, dy * scale, z + dz * scale);
+    leaf.name = 'plant-leaf';
+    scene.add(leaf);
+  }
+}
+
+function addArt(scene: THREE.Scene, x: number, width: number, height: number, color: number) {
+  const z = -R.depth / 2 + R.wall / 2 + 0.025;
+  const y = 1.52;
+  const frame = roomMaterial(P.metal, 0.48, 0.55);
+  box(scene, 'art-frame', [width, height, 0.045], [x, y, z], frame);
+  box(scene, 'art-print', [width - 0.075, height - 0.075, 0.012], [x, y, z + 0.03], roomMaterial(color, 0.92));
+}
+
+function addTvZone(scene: THREE.Scene) {
+  const console = F.console;
+  const metal = roomMaterial(P.metal, MAT.metalRoughness, MAT.metalness);
+  const wood = roomMaterial(P.wood, 0.7);
+  const x = console.x;
+  const z = console.z;
+  box(scene, 'tv-console-top', [console.depth, 0.055, console.width], [x, console.height - 0.028, z], wood);
+  box(scene, 'tv-console-carcass', [console.depth - 0.06, console.height - 0.12, console.width - 0.12], [x + 0.015, (console.height - 0.12) / 2, z], wood);
+  for (const dz of [-console.width / 2 + 0.06, console.width / 2 - 0.06]) {
+    for (const dx of [-console.depth / 2 + 0.05, console.depth / 2 - 0.05]) cylinder(scene, 'console-leg', 0.018, console.height - 0.02, [x + dx, (console.height - 0.02) / 2, z + dz], metal, 10);
+  }
+  const tv = F.tv;
+  box(scene, 'television', [0.06, tv.height, tv.width], [tv.x, tv.centerY, tv.z], roomMaterial(0x101315, 0.3, 0.2));
+  box(scene, 'television-screen', [0.012, tv.height - 0.06, tv.width - 0.06], [tv.x + 0.037, tv.centerY, tv.z], new THREE.MeshBasicMaterial({ color: 0x28383a }));
+}
+
+function addSideTableAndToys(scene: THREE.Scene) {
+  const metal = roomMaterial(P.metal, MAT.metalRoughness, MAT.metalness);
+  const wood = roomMaterial(P.wood, 0.74);
+  const tableX = F.sofa.x;
+  const tableZ = 1.52;
+  box(scene, 'sofa-side-table-top', [0.42, 0.045, 0.42], [tableX, 0.53, tableZ], wood);
+  for (const dx of [-0.16, 0.16]) for (const dz of [-0.16, 0.16]) cylinder(scene, 'side-table-leg', 0.012, 0.52, [tableX + dx, 0.26, tableZ + dz], metal, 8);
+  box(scene, 'toy-basket', [0.58, 0.34, 0.42], [-4.65, 0.17, -0.55], roomMaterial(P.taupe, 0.88));
+  const toy = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 8), roomMaterial(P.artA, 0.8));
+  toy.position.set(-4.58, 0.43, -0.55);
+  toy.name = 'toy-in-basket';
+  scene.add(toy);
+}
+
+function addPetStation(scene: THREE.Scene) {
+  const metal = roomMaterial(P.metal, 0.38, MAT.metalness);
+  const feeder = F.feeder;
+  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(feeder.radius, feeder.radius * 0.78, 0.09, 20, 1, true), metal);
+  bowl.position.set(feeder.x, 0.045, feeder.z);
+  bowl.name = 'metal-dog-feeder';
+  scene.add(bowl);
+
+  const water = F.water;
+  cylinder(scene, 'water-dispenser-base', water.radius, 0.12, [water.x, 0.06, water.z], metal);
+  const bottle = new THREE.Mesh(new THREE.CylinderGeometry(water.radius * 0.58, water.radius * 0.7, water.height, 20), new THREE.MeshStandardMaterial({ color: P.glass, transparent: true, opacity: 0.6, roughness: 0.2, metalness: 0.1 }));
+  bottle.position.set(water.x, 0.12 + water.height / 2, water.z);
+  bottle.name = 'water-dispenser-bottle';
+  scene.add(bottle);
+}
+
+function addSofa(scene: THREE.Scene) {
+  const { x, z, width, depth, seat, height } = F.sofa;
+  const fabric = roomMaterial(P.oatmeal, MAT.fabricRoughness);
+  const cushion = roomMaterial(P.cream, MAT.fabricRoughness);
+  const metal = roomMaterial(P.metal, MAT.metalRoughness, MAT.metalness);
+  const legX = x;
+  for (const dz of [-width / 2 + 0.13, width / 2 - 0.13]) {
+    for (const dx of [-depth / 2 + 0.1, depth / 2 - 0.1]) cylinder(scene, 'sofa-leg', 0.025, seat, [legX + dx, seat / 2, z + dz], metal, 10);
+  }
+  box(scene, 'sofa-seat-base', [depth, 0.18, width], [x, seat - 0.09, z], fabric);
+  box(scene, 'sofa-seat-cushion', [depth - 0.12, 0.14, width - 0.16], [x - 0.015, seat + 0.07, z], cushion);
+  box(scene, 'sofa-back', [0.2, height - seat, width], [x + depth / 2 - 0.1, seat + (height - seat) / 2, z], fabric);
+  for (const side of [-1, 1]) box(scene, 'sofa-arm', [depth, 0.46, 0.16], [x, seat + 0.23, z + side * (width / 2 - 0.08)], fabric);
+  box(scene, 'sofa-throw', [0.42, 0.04, 0.62], [x - 0.06, seat + 0.17, z + width * 0.26], roomMaterial(P.paleGray, MAT.fabricRoughness));
+  box(scene, 'sofa-pillow', [0.2, 0.32, 0.34], [x + 0.22, seat + 0.29, z - width * 0.28], cushion);
+}
+
+function addCrib(scene: THREE.Scene) {
+  const { x, z, length, width, height } = F.crib;
+  const metal = roomMaterial(P.metal, MAT.metalRoughness, MAT.metalness);
+  const bedding = roomMaterial(P.cream, MAT.fabricRoughness);
+  const railHeight = height - 0.45;
+  box(scene, 'crib-mattress', [length - 0.12, 0.08, width - 0.12], [x, 0.45, z], bedding);
+  for (const dx of [-length / 2 + 0.025, length / 2 - 0.025]) box(scene, 'crib-end-rail', [0.04, railHeight, width], [x + dx, 0.45 + railHeight / 2, z], metal);
+  for (const dz of [-width / 2 + 0.025, width / 2 - 0.025]) {
+    box(scene, 'crib-side-rail', [length, 0.045, 0.045], [x, height - 0.08, z + dz], metal);
+    for (let i = 1; i < 9; i++) cylinder(scene, 'crib-spindle', 0.012, railHeight - 0.06, [x - length / 2 + length * i / 9, 0.45 + railHeight / 2, z + dz], metal, 8);
+  }
+  for (const dx of [-length / 2 + 0.07, length / 2 - 0.07]) for (const dz of [-width / 2 + 0.07, width / 2 - 0.07]) cylinder(scene, 'crib-post', 0.025, height, [x + dx, height / 2, z + dz], metal, 10);
+}
+
+function addDogBed(scene: THREE.Scene) {
+  const { x, z, length, width, height } = F.dogBed;
+  const fabric = roomMaterial(P.taupe, MAT.fabricRoughness);
+  box(scene, 'dog-bed-base', [length, height, width], [x, height / 2, z], fabric);
+  box(scene, 'dog-bed-cushion', [length - 0.12, 0.08, width - 0.12], [x, height + 0.035, z], roomMaterial(P.cream, MAT.fabricRoughness));
+}
+
+function addShelf(scene: THREE.Scene) {
+  const { x, z, width, depth, height } = F.shelf;
+  const metal = roomMaterial(P.metal, MAT.metalRoughness, MAT.metalness);
+  const timber = roomMaterial(P.wood, 0.72);
+  for (const dx of [-depth / 2 + 0.025, depth / 2 - 0.025]) {
+    for (const dz of [-width / 2 + 0.025, width / 2 - 0.025]) box(scene, 'shelf-upright', [0.03, height, 0.03], [x + dx, height / 2, z + dz], metal);
+  }
+  for (let level = 0; level < 5; level++) {
+    const y = 0.08 + level * (height - 0.14) / 4;
+    box(scene, 'shelf-board', [depth, 0.035, width], [x, y, z], timber);
+    if (level === 1) for (let book = 0; book < 3; book++) box(scene, 'shelf-book', [0.16, 0.2 + book * 0.015, 0.12], [x, y + 0.12, z - 0.23 + book * 0.15], roomMaterial([0x85786c, 0xb5a992, 0x777d78][book], 0.86));
+  }
+  addPlant(scene, x, z, 0.42);
+}
+
+function addChandelier(scene: THREE.Scene) {
+  const { x, z, bottom } = F.chandelier;
+  const metal = roomMaterial(P.metal, MAT.metalRoughness, MAT.metalness);
+  const stemTop = R.height - 0.04;
+  cylinder(scene, 'chandelier-canopy', 0.1, 0.035, [x, stemTop, z], metal);
+  cylinder(scene, 'chandelier-stem', 0.014, stemTop - bottom, [x, (stemTop + bottom) / 2, z], metal, 12);
+  const ringY = bottom + 0.12;
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.018, 8, 28), metal);
+  ring.position.set(x, ringY, z);
+  ring.rotation.x = Math.PI / 2;
+  ring.name = 'chandelier-ring';
+  scene.add(ring);
+  for (let i = 0; i < 4; i++) {
+    const angle = i * Math.PI / 2;
+    cylinder(scene, 'chandelier-arm', 0.012, 0.34, [x + Math.cos(angle) * 0.18, ringY, z + Math.sin(angle) * 0.18], metal, 10).rotation.z = Math.PI / 2;
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 8), new THREE.MeshStandardMaterial({ color: P.light, emissive: P.light, emissiveIntensity: 0.8, roughness: 0.35 }));
+    bulb.position.set(x + Math.cos(angle) * 0.37, ringY - 0.035, z + Math.sin(angle) * 0.37);
+    bulb.name = 'chandelier-bulb';
+    scene.add(bulb);
+  }
+  const light = new THREE.PointLight(P.light, 28, 12, 2);
+  light.position.set(x, ringY - 0.08, z);
+  light.name = 'warm-room-light';
+  scene.add(light);
+}
+
+function addContactShadow(scene: THREE.Scene, x: number, z: number, width: number, depth: number) {
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 32), new THREE.MeshBasicMaterial({ color: 0x27231f, transparent: true, opacity: 0.08, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.set(x, 0.004, z);
+  shadow.scale.set(width / 2, depth / 2, 1);
+  shadow.name = 'soft-contact-shadow';
+  scene.add(shadow);
+}
 
 export interface RoomScene { scene: THREE.Scene; update(dt: number): void; dispose(): void; }
-export function createRoomScene(low = false): RoomScene {
+
+export function createRoomScene(_low = false): RoomScene {
   const scene = new THREE.Scene();
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(ROOM.width, .14, ROOM.depth), new THREE.MeshStandardMaterial({ map: floorTexture(), roughness: 1 })); floor.position.y = -.07; floor.name = 'room-floor'; scene.add(floor);
-  box(scene, [ROOM.width, ROOM.height, .14], [0, ROOM.height / 2, -ROOM.depth / 2], ROOM_TOKENS.wall, 'back-wall'); box(scene, [.14, ROOM.height, ROOM.depth], [-ROOM.width / 2, ROOM.height / 2, 0], ROOM_TOKENS.wall, 'left-wall'); box(scene, [.14, ROOM.height, ROOM.depth], [ROOM.width / 2, ROOM.height / 2, 0], ROOM_TOKENS.wall, 'right-wall');
-  box(scene, [ROOM.width, .12, .16], [0, .08, -ROOM.depth / 2 + .1], ROOM_TOKENS.trim, 'back-baseboard'); box(scene, [.16, .12, ROOM.depth], [-ROOM.width / 2 + .1, .08, 0], ROOM_TOKENS.trim, 'left-baseboard'); box(scene, [.16, .12, ROOM.depth], [ROOM.width / 2 - .1, .08, 0], ROOM_TOKENS.trim, 'right-baseboard');
-  box(scene, [ROOM.width, .08, ROOM.depth], [0, ROOM.height + .02, 0], 0xe5e1da, 'ceiling');
-  const rugMat = new THREE.MeshStandardMaterial({ map: fabricTexture('#7d9b94', '#d7ded1'), roughness: 1 }); const rug = new THREE.Mesh(new THREE.BoxGeometry(7.4, .025, 5.1), rugMat); rug.position.set(-.15, .02, .35); rug.rotation.y = -.015; rug.name = 'open-play-mat'; scene.add(rug);
-  box(scene, [1.85, .22, 1.2], [-3.35, .13, -1.9], ROOM_TOKENS.bed, 'dog-bed', new THREE.MeshStandardMaterial({ map: fabricTexture('#75929a', '#d7ded1'), roughness: 1 })); const pillow = new THREE.Mesh(new THREE.SphereGeometry(.4, 20, 12), mat(ROOM_TOKENS.fabric)); pillow.scale.set(1.45, .3, .8); pillow.position.set(-3.35, .32, -1.9); scene.add(pillow);
-  addFeedingStation(scene);
-  box(scene, [.75, .55, .55], [-4.2, .28, 1.65], ROOM_TOKENS.wood, 'toy-bin'); cylinder(scene, .11, .07, [-4.2, .6, 1.65], 0xd25e54, 'ball');
-  if (!low) { addWindow(scene); addPlant(scene, 4.35, 2.55); addLamp(scene, 1.65, 2.25); addCouch(scene); addStairs(scene); addFrontEntry(scene); addCrib(scene); addChandelier(scene); addPainting(scene, -3.1, 2.45, -3.88, 0xc88367); addPainting(scene, 2.2, 2.45, -3.88, 0x7da4a5); addPainting(scene, -5.41, 2.25, .25, 0xc99d5a, true); addTV(scene); addFloorToys(scene); box(scene, [1.8, .7, .48], [2.55, .35, -3.45], ROOM_TOKENS.wood, 'low-console'); for (let i = 0; i < 3; i++) box(scene, [1.45, .07, .12], [2.55, .72 + i * .28, -3.45], ROOM_TOKENS.trim, 'console-shelf'); }
-  const hemi = new THREE.HemisphereLight(0xfff4dd, 0x536a68, 2); scene.add(hemi); const key = new THREE.DirectionalLight(0xffd8a8, 2.7); key.position.set(-3, 5, 2); scene.add(key);
-  return { scene, update: (_dt: number) => {}, dispose: () => { scene.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); if (Array.isArray(m.material)) m.material.forEach((x) => x.dispose()); else if (m.material) m.material.dispose(); }); } };
+  scene.background = new THREE.Color(0xe7e3dc);
+  const floorMaterial = new THREE.MeshStandardMaterial({ map: plankTexture(), roughness: MAT.floorRoughness, metalness: 0 });
+  box(scene, 'room-floor', [R.width, R.floor, R.depth], [0, -R.floor / 2, 0], floorMaterial);
+  const wallMaterial = roomMaterial(P.wall, MAT.wallRoughness);
+  // The ceiling remains part of the house shell, but does not occlude an interior orbit view.
+  const ceilingMaterial = new THREE.MeshStandardMaterial({ color: P.wall, roughness: MAT.wallRoughness, side: THREE.BackSide });
+  const window = ROOM_SPEC.window;
+  const backSideWidth = (R.width - window.width) / 2;
+  const upperWallHeight = R.height - window.sill - window.height;
+  box(scene, 'back-wall-left', [backSideWidth, R.height, R.wall], [window.x - window.width / 2 - backSideWidth / 2, R.height / 2, -R.depth / 2], wallMaterial);
+  box(scene, 'back-wall-right', [backSideWidth, R.height, R.wall], [window.x + window.width / 2 + backSideWidth / 2, R.height / 2, -R.depth / 2], wallMaterial);
+  box(scene, 'back-wall-below-window', [window.width, window.sill, R.wall], [window.x, window.sill / 2, -R.depth / 2], wallMaterial);
+  box(scene, 'back-wall-above-window', [window.width, upperWallHeight, R.wall], [window.x, window.sill + window.height + upperWallHeight / 2, -R.depth / 2], wallMaterial);
+  box(scene, 'left-wall', [R.wall, R.height, R.depth], [-R.width / 2, R.height / 2, 0], wallMaterial);
+  box(scene, 'right-wall', [R.wall, R.height, R.depth], [R.width / 2, R.height / 2, 0], wallMaterial);
+  const sideWidth = (R.width - ROOM_SPEC.door.width) / 2;
+  box(scene, 'entry-wall-left', [sideWidth, R.height, R.wall], [-(ROOM_SPEC.door.width + sideWidth) / 2, R.height / 2, R.depth / 2], wallMaterial);
+  box(scene, 'entry-wall-right', [sideWidth, R.height, R.wall], [(ROOM_SPEC.door.width + sideWidth) / 2, R.height / 2, R.depth / 2], wallMaterial);
+  box(scene, 'entry-wall-lintel', [ROOM_SPEC.door.width, R.height - ROOM_SPEC.door.height, R.wall], [0, ROOM_SPEC.door.height + (R.height - ROOM_SPEC.door.height) / 2, R.depth / 2], wallMaterial);
+  box(scene, 'ceiling', [R.width, 0.08, R.depth], [0, R.height + 0.04, 0], ceilingMaterial);
+  addBaseboards(scene);
+  addWindow(scene);
+  addArt(scene, -3.15, 0.72, 0.82, P.artA);
+  addArt(scene, 3.05, 0.92, 0.7, P.artB);
+  addArt(scene, 4.38, 0.42, 0.58, P.artC);
+
+  addTvZone(scene);
+  addSofa(scene);
+  addSideTableAndToys(scene);
+  addPetStation(scene);
+  addCrib(scene);
+  addDogBed(scene);
+  addShelf(scene);
+  addPlant(scene, -2.3, -3.32, 1.05);
+  addPlant(scene, 2.55, -3.38, 0.82);
+  addPlant(scene, 4.8, -3.28, 0.72);
+  addChandelier(scene);
+  addContactShadow(scene, F.sofa.x, F.sofa.z, 1.1, 2.3);
+  addContactShadow(scene, F.crib.x, F.crib.z, 1.5, 0.82);
+  addContactShadow(scene, F.dogBed.x, F.dogBed.z, 1.05, 0.76);
+
+  const hemisphere = new THREE.HemisphereLight(0xfff5e6, 0x625c52, 1.35);
+  hemisphere.name = 'soft-ambient-fill';
+  scene.add(hemisphere);
+  const daylight = new THREE.DirectionalLight(0xffebd0, 1.5);
+  daylight.position.set(1.5, 4.5, -2.5);
+  daylight.name = 'window-daylight';
+  scene.add(daylight);
+  return {
+    scene,
+    update: (_dt: number) => {},
+    dispose: () => scene.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+      if (Array.isArray(mesh.material)) mesh.material.forEach((material) => material.dispose());
+      else if (mesh.material) mesh.material.dispose();
+    }),
+  };
+}
+
+export function validateRoomLayout() {
+  const { minX, maxX, minZ, maxZ } = ROOM_SPEC.play;
+  const playArea = (maxX - minX) * (maxZ - minZ);
+  const floorArea = R.width * R.depth;
+  const furniture = [
+    { name: 'sofa', minX: F.sofa.x - F.sofa.depth / 2, maxX: F.sofa.x + F.sofa.depth / 2, minZ: F.sofa.z - F.sofa.width / 2, maxZ: F.sofa.z + F.sofa.width / 2 },
+    { name: 'crib', minX: F.crib.x - F.crib.length / 2, maxX: F.crib.x + F.crib.length / 2, minZ: F.crib.z - F.crib.width / 2, maxZ: F.crib.z + F.crib.width / 2 },
+    { name: 'dog bed', minX: F.dogBed.x - F.dogBed.length / 2, maxX: F.dogBed.x + F.dogBed.length / 2, minZ: F.dogBed.z - F.dogBed.width / 2, maxZ: F.dogBed.z + F.dogBed.width / 2 },
+    { name: 'shelf', minX: F.shelf.x - F.shelf.depth / 2, maxX: F.shelf.x + F.shelf.depth / 2, minZ: F.shelf.z - F.shelf.width / 2, maxZ: F.shelf.z + F.shelf.width / 2 },
+    { name: 'TV console', minX: F.console.x - F.console.depth / 2, maxX: F.console.x + F.console.depth / 2, minZ: F.console.z - F.console.width / 2, maxZ: F.console.z + F.console.width / 2 },
+    { name: 'side table', minX: F.sofa.x - .21, maxX: F.sofa.x + .21, minZ: 1.31, maxZ: 1.73 },
+    { name: 'feeder', minX: F.feeder.x - F.feeder.radius, maxX: F.feeder.x + F.feeder.radius, minZ: F.feeder.z - F.feeder.radius, maxZ: F.feeder.z + F.feeder.radius },
+    { name: 'water dispenser', minX: F.water.x - F.water.radius, maxX: F.water.x + F.water.radius, minZ: F.water.z - F.water.radius, maxZ: F.water.z + F.water.radius },
+  ];
+  const inside = (item: typeof furniture[number]) => item.minX >= -R.width / 2 && item.maxX <= R.width / 2 && item.minZ >= -R.depth / 2 && item.maxZ <= R.depth / 2;
+  const outsidePlay = (item: typeof furniture[number]) => item.maxX <= minX || item.minX >= maxX || item.maxZ <= minZ || item.minZ >= maxZ;
+  const overlaps = furniture.flatMap((item, index) => furniture.slice(index + 1).filter((other) => item.minX < other.maxX && item.maxX > other.minX && item.minZ < other.maxZ && item.maxZ > other.minZ).map((other) => [item.name, other.name] as const));
+  return {
+    playArea,
+    playAreaRatio: playArea / floorArea,
+    furnitureInsideRoom: furniture.every(inside),
+    furnitureOutsidePlayZone: furniture.every(outsidePlay),
+    noFurnitureOverlaps: overlaps.length === 0,
+    overlaps,
+    sofaToTvViewingDistance: Math.abs(F.sofa.x - F.sofa.depth / 2 - F.tv.x),
+    chandelierBottom: F.chandelier.bottom,
+    checks: furniture.map((item) => ({ name: item.name, insideRoom: inside(item), outsidePlayZone: outsidePlay(item) })),
+  };
 }

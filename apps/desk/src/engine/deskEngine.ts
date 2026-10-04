@@ -1,6 +1,6 @@
 // The real F1 engine (apps/web) on the Desk, behind the same PetEngine surface App.tsx already uses.
 // Falls back to MockPetEngine when WebGL is unavailable or the renderer cannot start.
-import { Engine } from '@fetch/web/src/engine'
+import { Engine } from '@fetch/web/src/engine/index'
 import { generatePet as runPipeline } from '@fetch/web/src/engine/pipeline/generate'
 import type { ActionStep, LocalIntent, Mode, Mood, PetBundle, PetEngine, PlatformRect, RunEvent, Species } from '../contracts'
 import { MockPetEngine } from '../mockEngine'
