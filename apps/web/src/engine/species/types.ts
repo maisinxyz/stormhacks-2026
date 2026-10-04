@@ -1,7 +1,7 @@
 import type { LocalIntent, Species, Verb } from '@fetch/contracts';
 import type { Clip } from '../anim';
 
-export type ParticleKind = 'dust' | 'feather' | 'dirt' | 'puff';
+export type ParticleKind = 'dust' | 'feather' | 'dirt' | 'puff' | 'heart' | 'sparkle';
 export type FeedItem = 'treat' | 'fish' | 'seed' | 'cracker';
 export interface VerbAnim {
   clips: string[];            // composed from base clips, played in order and cycled

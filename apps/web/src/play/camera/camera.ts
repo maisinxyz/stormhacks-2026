@@ -5,6 +5,7 @@ import { parseCommand, PushToTalk } from '../voice';
 import type { OrientationStatus } from './pose';
 import type { LocalIntent } from '@fetch/contracts';
 import type { PlayContext, PlayView, PlayViewId } from '../types';
+import { plushFromPhoto } from '../../engine/sdf/fromPhoto';
 import { Alive } from './lookat';
 import './camera.css';
 import { composite, deliver } from './capture';
@@ -85,6 +86,7 @@ export class CameraView implements PlayView {
         command: i => { this.following = false; this.alive.focus(2.5); e.doIntent(i); },
         follow: () => this.follow(),
         swap: () => this.swapSide(),
+        photo: f => void this.usePhoto(f),
         micDown: () => { e.setListening(true); this.alive.focus(6); this.voice.start(); },
         micUp: () => { e.setListening(false); this.voice.stop(); },
         ar: () => void this.toggleXr(),
@@ -93,8 +95,8 @@ export class CameraView implements PlayView {
       this.ui.micEnabled(this.voice.supported);
       void xrSupported().then(ok => this.ui.showAr(ok));
       // Tap on the dog: the engine plays the affectionate "tap" reaction; here it also turns its head to the user.
-      e.on('POKE', () => { if (this.entered) this.alive.focus(3); });
-      e.on('PET_STROKE', () => { if (this.entered) this.alive.focus(1.5); });
+      e.on('POKE', () => { if (this.entered) { this.alive.focus(3); this.hearts(); } });
+      e.on('PET_STROKE', () => { if (this.entered) { this.alive.focus(1.5); this.hearts(); } });
     }
   }
 
@@ -142,6 +144,7 @@ export class CameraView implements PlayView {
     this.live = true;
     this.pose.recenter();
     this.alive.enter(); // greeting: faces the user, wags
+    this.ctx.engine.flourish('sparkle'); // it appears with a soft sparkle
     if (orient === 'denied') {
       this.ctx.emit?.({ type: 'view.error', view: 'camera', code: 'orientation_denied', message: 'Motion access denied' });
       this.ui.toast('Motion access is off, so turning the phone will not move the dog.', 6000);
@@ -226,6 +229,28 @@ export class CameraView implements PlayView {
     const half = d * k, x = this.side * (half - width(s) / 2 - 0.06 * half);
     e.placePet(x, START_DISTANCE - d, walk);
     e.facePet(-this.side as 1 | -1); // toward the centre (after the walk, if it is walking there)
+  }
+
+  private lastHearts = 0;
+  /** Hearts float up when the dog is petted (at most every 0.7 s: strokes fire many events). */
+  private hearts() { const t = performance.now(); if (t - this.lastHearts > 700) { this.lastHearts = t; this.ctx.engine.flourish('heart'); } }
+
+  /** Upload a dog photo: the plush pet takes its coat colours from it (no server or AI quota needed).
+   *  ponytail: colours only for now; the shape (ears, snout, build) stays the default plush dog. */
+  private async usePhoto(file: File) {
+    const e = this.ctx.engine, s = this.ctx.session;
+    try {
+      s.bundle = { ...s.bundle, id: `plush-${Date.now()}`, plush: await plushFromPhoto(file) as unknown as Record<string, unknown> };
+      await e.loadPet(s.bundle);
+      e.setQuality(s.quality); e.setAutonomous(false); e.setSplatDepthTest(false);
+      this.placeSide(false);
+      e.flourish('sparkle');
+      this.alive.focus(3);
+      this.ui.toast('Made a plush pet in the colours of your dog.', 4000);
+    } catch (err) {
+      console.warn('photo -> plush failed', err);
+      this.ui.toast('Could not read that photo. Try another one.');
+    }
   }
 
   private swapSide() {

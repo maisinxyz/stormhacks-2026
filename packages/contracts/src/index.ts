@@ -11,6 +11,8 @@ export interface PetBundle {
   rigUrl: string;        // rig.json
   weightsUrl: string;    // weights.bin: per splat 4x uint8 bone idx + 4x uint8 weight
   thumbnailUrl: string;
+  /** Plush pet drawn with signed distance fields instead of splats (engine/sdf/sdfPet.ts: PlushTraits). When set, the splat/rig/weights URLs are not fetched. */
+  plush?: Record<string, unknown>;
   voiceId?: string;
   personality: { eager: number; sassy: number; anxious: number; chatty: number };
   stats: { energy: number; happiness: number; hunger: number };

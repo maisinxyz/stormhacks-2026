@@ -99,8 +99,8 @@ export async function registerMediaRoutes(app: FastifyInstance, ctx: ServerConte
       return reply.type('image/png').send(png);
     });
     scoped.post('/gen/reference', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
-      const b = z.object({ imageId: imageIdSchema, species: speciesSchema, kind: z.enum(['drawing', 'photo']).default('drawing') }).strict().parse(req.body);
-      try { return await media.reference(user(req), b.imageId, b.species, b.kind); } catch (e) { return quota(e, reply); }
+      const b = z.object({ imageId: imageIdSchema, species: speciesSchema, kind: z.enum(['drawing', 'photo']).default('drawing'), style: z.enum(['photoreal', 'plush']).default('photoreal') }).strict().parse(req.body);
+      try { return await media.reference(user(req), b.imageId, b.species, b.kind, b.style); } catch (e) { return quota(e, reply); }
     });
     scoped.post('/gen/image-to-3d', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async req => {
       const b = z.object({ imageIds: z.array(imageIdSchema).refine(v => v.length === 1 || v.length === 3, 'Provide one or three images'), species: speciesSchema }).strict().parse(req.body);

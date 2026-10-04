@@ -58,7 +58,7 @@ export async function generatePet(api: string, input: GenInput, onProgress: Prog
   let imageId = uploaded;
   p(input.kind === 'drawing' ? 'cleanup' : 'pose', 0.08);
   try {
-    imageId = (await json<{ imageId: string }>(await postJson('/gen/reference', { imageId: uploaded, species: input.species, kind: input.kind }))).imageId;
+    imageId = (await json<{ imageId: string }>(await postJson('/gen/reference', { imageId: uploaded, species: input.species, kind: input.kind, ...(plushStyle() ? { style: 'plush' } : {}) }))).imageId;
   } catch (err) {
     if (input.kind === 'drawing' || isQuota(err)) throw err;
     console.warn('photo repose failed, using the original photo:', err);
@@ -110,3 +110,6 @@ export async function generatePet(api: string, input: GenInput, onProgress: Prog
   p('save', 1);
   return bundle;
 }
+
+/** `?style=plush` on the page asks the server for the plush-toy reference instead of the photoreal one (opt-in; default unchanged). */
+function plushStyle() { try { return new URLSearchParams(location.search).get('style') === 'plush'; } catch { return false; } }

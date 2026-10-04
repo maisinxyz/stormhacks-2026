@@ -11,6 +11,7 @@ import { Skeleton, type Bone } from './skeleton';
 import { Props, type Prop } from './props';
 import { PACKS, type FeedItem, type SpeciesPack } from './species';
 import { MAX_BONES, SplatMesh } from './splatRenderer';
+import { SdfPet, type PlushTraits } from './sdf/sdfPet';
 
 
 export type Quality = 'high' | 'low';
@@ -73,7 +74,7 @@ export class Engine implements PetEngine {
   private overlay?: THREE.Scene;
   private claimedGestures = new Set<number>();
   private furnitureSpots: FurnitureSpot[] = [];
-  private splat?: SplatMesh;
+  private splat?: SplatMesh | SdfPet; // the pet's renderer: Gaussian splats, or the SDF plush dog
   private mode: Mode = 'work';
   private platforms: Platform[] = [];
   onFrame?: (t: number, frame?: XRFrame) => void;
@@ -120,7 +121,9 @@ export class Engine implements PetEngine {
   }
 
   async loadPet(b: PetBundle) {
-    const [splat, weights, rig] = await Promise.all([
+    // A plush bundle carries traits, not files: the SDF renderer builds its own body and rig from them.
+    const sdf = b.plush ? new SdfPet(b.plush as unknown as PlushTraits) : undefined;
+    const [splat, weights, rig] = sdf ? [undefined, undefined, { bones: sdf.bones }] : await Promise.all([
       fetch(b.splatUrl).then(r => r.arrayBuffer()),
       fetch(b.weightsUrl).then(r => r.arrayBuffer()),
       fetch(b.rigUrl).then(r => r.json()),
@@ -129,8 +132,8 @@ export class Engine implements PetEngine {
     if (this.splat) this.scene.remove(this.splat.mesh);
     this.sk = new Skeleton(rig.bones);
     this.peek?.dispose();
-    this.peek = this.peekCanvas && new PeekScene(this.peekCanvas, PACKS[b.species], splat, weights, rig.bones);
-    this.splat = new SplatMesh(splat, weights);
+    this.peek = splat && weights && this.peekCanvas ? new PeekScene(this.peekCanvas, PACKS[b.species], splat, weights, rig.bones) : undefined; // ponytail: no edge-peek for plush pets (Desk errands only)
+    this.splat = sdf ?? new SplatMesh(splat!, weights!);
     this.splat.setBudget(BUDGET[this.quality]);
     this.splat.uniforms.uTint.value.copy(this.tint);
     this.scene.add(this.splat.mesh);
@@ -220,6 +223,8 @@ export class Engine implements PetEngine {
 
   // ---- Camera-view seams (play.md B): the pet walks in world metres on the ground plane (Person A's model) ----
   setPetScale(s: number) { this.petScale = s; }
+  /** A little burst above the pet: hearts when it is petted, sparkles when it appears (camera view flourish). */
+  flourish(kind: 'heart' | 'sparkle') { const p = this.petPosition; p.y += 1.05 * this.petScale; this.props?.burst(kind, p, kind === 'heart' ? 4 : 14); }
   private autonomous = true;
   /** false = the pet only moves on a command (camera view). */
   setAutonomous(on: boolean) { this.autonomous = on; this.beh?.setAutonomous(on); }

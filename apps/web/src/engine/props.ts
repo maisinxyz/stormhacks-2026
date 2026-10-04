@@ -29,7 +29,8 @@ function propTexture(p: Prop): THREE.Texture {
   return t;
 }
 
-const COLORS: Record<ParticleKind, number> = { dust: 0xb9a98c, feather: 0xffffff, dirt: 0x6b4a2b, puff: 0xfff3c4 };
+const COLORS: Record<ParticleKind, number> = { dust: 0xb9a98c, feather: 0xffffff, dirt: 0x6b4a2b, puff: 0xfff3c4, heart: 0xffffff, sparkle: 0xfff1b0 };
+const FLOATY: ParticleKind[] = ['feather', 'heart', 'sparkle']; // drift up instead of falling
 
 export function propSprite(p: Prop, size: number) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: propTexture(p), transparent: true, depthTest: false }));
@@ -41,8 +42,9 @@ export function propSprite(p: Prop, size: number) {
 export class Props {
   private carry?: THREE.Sprite;
   private world?: THREE.Sprite;
-  private parts: { s: THREE.Sprite; v: THREE.Vector3; life: number }[] = [];
+  private parts: { s: THREE.Sprite; v: THREE.Vector3; life: number; g: number }[] = [];
   private dot: THREE.Texture;
+  private heart: THREE.Texture;
 
   constructor(private scene: THREE.Scene) {
     const c = document.createElement('canvas');
@@ -51,6 +53,13 @@ export class Props {
     g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)');
     x.fillStyle = g; x.fillRect(0, 0, 32, 32);
     this.dot = new THREE.CanvasTexture(c);
+    // heart drawn as a path (an emoji glyph is not guaranteed to exist on every device)
+    const hc = document.createElement('canvas');
+    hc.width = hc.height = 64;
+    const h = hc.getContext('2d')!;
+    h.fillStyle = '#ff5c8a';
+    h.beginPath(); h.moveTo(32, 56); h.bezierCurveTo(-6, 30, 12, 4, 32, 20); h.bezierCurveTo(52, 4, 70, 30, 32, 56); h.fill();
+    this.heart = new THREE.CanvasTexture(hc);
   }
 
   private sprite(p: Prop, size: number) {
@@ -72,11 +81,11 @@ export class Props {
 
   burst(kind: ParticleKind, at: THREE.Vector3, n = 10) {
     for (let i = 0; i < n; i++) {
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.dot, color: COLORS[kind], transparent: true, depthTest: false }));
-      s.position.copy(at); s.scale.setScalar(kind === 'feather' ? 0.07 : 0.1); s.renderOrder = 9;
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: kind === 'heart' ? this.heart : this.dot, color: COLORS[kind], transparent: true, depthTest: false }));
+      s.position.copy(at); s.scale.setScalar(kind === 'feather' || kind === 'sparkle' ? 0.07 : kind === 'heart' ? 0.2 : 0.1); s.renderOrder = 9;
       this.scene.add(s);
-      const up = kind === 'feather' ? 0.4 : 0.8;
-      this.parts.push({ s, v: new THREE.Vector3((Math.random() - 0.5) * 0.9, Math.random() * up, (Math.random() - 0.5) * 0.5), life: 0.8 });
+      const floaty = FLOATY.includes(kind), up = kind === 'feather' ? 0.4 : 0.8;
+      this.parts.push({ s, v: new THREE.Vector3((Math.random() - 0.5) * 0.9, (floaty ? 0.3 : 0) + Math.random() * up, (Math.random() - 0.5) * 0.5), life: kind === 'heart' ? 1.2 : 0.8, g: floaty ? 0.3 : 1.5 });
     }
   }
 
@@ -86,7 +95,7 @@ export class Props {
       const p = this.parts[i];
       p.life -= dt;
       p.s.position.addScaledVector(p.v, dt);
-      p.v.y -= (p.s.material.color.getHex() === COLORS.feather ? 0.3 : 1.5) * dt;
+      p.v.y -= p.g * dt;
       p.s.material.opacity = Math.max(0, p.life / 0.8);
       if (p.life <= 0) { this.scene.remove(p.s); p.s.material.dispose(); this.parts.splice(i, 1); }
     }

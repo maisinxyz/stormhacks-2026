@@ -469,6 +469,18 @@ The existing `Interactions` window listeners keep working; Person B only needs t
 - **Grain/noise match:** a light static film-grain overlay over the feed and the dog (built; never in captures).
 - **Known limits (stated in the UI help and here):** no real occlusion (the dog draws over everything), no lighting from the real scene beyond the tint, and gyro anchoring cannot track walking through the room.
 
+### B.8a Art direction: the plush dog (`engine/sdf/`)
+The scanned-looking splat dog was blurry up close, uncanny, not cute, and did not blend with the video. The event brief also asks for techniques beyond mesh rendering. **Decided: a soft plush toy look, drawn with signed distance fields (SDFs).**
+
+- **Default dog (before any photo is uploaded):** "Biscuit", `public/bundles/plush/bundle.json`. It is a bundle with `plush` traits and no splat files. The Play shell loads it by default; `?pet=golden` keeps the scanned splat dog, and the Desk is unchanged.
+- **How it is drawn (`sdfPet.ts`):** about 25 ellipsoids joined with a smooth union, each attached to a rig bone, raymarched per pixel inside a box around the pet. The existing clips animate it (walk, sit, wag, head look). Shading is wrapped light, a fuzz rim, noise on the normals, ambient occlusion, a soft halo at the silhouette, glossy button eyes and nose, dashed stitching down the back and under the muzzle. The eyes blink. It writes depth, so Room furniture occludes it.
+- **Continuous traits (`PlushTraits`):** body length, girth, leg length, head size, snout length, ear shape (floppy to pointy), ear size, tail length and carriage, and eight colours. The body and its rig are generated from these numbers, so any dog is a different set of numbers, not a different model.
+- **Photo upload ("My dog photo" under ⋯):** makes a plush pet from a photo on the device, with no server or quota. **Today only the coat colours come from the photo** (k-means on the middle of the image, `fromPhoto.ts`); the shape stays the default. Reading ear type, snout and build from the photo is not built: it needs a vision model or silhouette fitting (open decision).
+- **Flourish:** hearts float up when the dog is petted; a soft sparkle when it appears.
+- **Splat route kept:** the server's reference step has an opt-in plush prompt (`style: 'plush'`, selected with `?style=plush` on the page) that turns the photo into a plush toy before TRELLIS. The default prompt is unchanged. **Not exercised yet:** it needs generation quota (a Hugging Face token).
+
+Status: built and checked on desktop only (camera harness passes with the plush dog). The test browser is capped near 30 fps even with an empty scene, so the plush dog's cost on a phone is **unmeasured**; the agreed gate is 30 fps on an iPhone or it is cut back to the splat dog there.
+
 ### B.9 Capture (`capture.ts`)
 - The capture button draws the current video frame, then the engine canvas, into one offscreen 2D canvas (match the video's aspect) and exports `image/jpeg` (or png). The renderer must be rendered in the same task immediately before `drawImage` (or the engine created with `preserveDrawingBuffer` only during capture), otherwise the canvas reads back blank.
 - Output: `navigator.share({ files })` when available (mobile), otherwise a download. A brief shutter flash and a small thumbnail confirm the capture. Captures never include UI chrome.

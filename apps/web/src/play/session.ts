@@ -4,7 +4,8 @@ import type { PetSession } from './types';
 const placeholder: PetBundle = { id: 'placeholder-dog', name: 'Pip', species: 'dog', splatUrl: '/bundles/dog/pet.splat', rigUrl: '/bundles/dog/rig.json', weightsUrl: '/bundles/dog/weights.bin', thumbnailUrl: '', personality: { eager: .85, sassy: .2, anxious: .15, chatty: .3 }, stats: { energy: 82, happiness: 88, hunger: 20 }, createdAt: new Date().toISOString() };
 
 export async function loadPetSession(id?: string): Promise<{ session: PetSession; fallback: boolean }> {
-  const species = id?.toLowerCase().includes('bird') ? 'bird' : 'dog';
+  const key = id?.toLowerCase() ?? '';
+  const species = key.includes('bird') ? 'bird' : key.includes('golden') || key.includes('splat') ? 'dog' : 'plush'; // default: the plush dog, before any photo is uploaded
   try {
     const response = await fetch(`/bundles/${species}/bundle.json`);
     if (!response.ok) throw new Error('bundle unavailable');

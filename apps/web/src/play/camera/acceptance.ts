@@ -217,10 +217,10 @@ export async function run(shell: PlayShell) {
     const f0 = performance.now(); await sleep(3000); e.onFrame = prev;
     const fps = frames / ((performance.now() - f0) / 1000), gl = e.renderer.getContext(), dbg = gl.getExtension('WEBGL_debug_renderer_info');
     add('fps', 'B.13-10 30+ fps at the low preset on a mid-range phone', fps >= 30 ? null : false,
-      `${fps.toFixed(0)} fps on THIS desktop (${dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)).slice(0, 60) : 'unknown GPU'}), quality ${e.quality}, ${e.splat.count} splats drawn (placeholder dog; a real pet is up to 120k), render scale ${e.pr}. Not a phone measurement`);
+      `${fps.toFixed(0)} fps on THIS desktop (${dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)).slice(0, 60) : 'unknown GPU'}), quality ${e.quality}, ${e.splat.count === undefined ? 'SDF plush dog (raymarched, no splats)' : e.splat.count + ' splats drawn'}, render scale ${e.pr}. Not a phone measurement`);
 
     // B13-11: WebXR cannot run here; check the non-XR projection path the XR change touched
-    const size = e.renderer.getDrawingBufferSize(new THREE.Vector2()), fy = size.y / (2 * Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV) / 2)), uf = e.splat.uniforms.uFocal.value;
+    const size = e.renderer.getDrawingBufferSize(new THREE.Vector2()), fy = size.y / (2 * Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV) / 2)), uf = e.splat.uniforms.uFocal?.value ?? new THREE.Vector2(0, fy); // the SDF plush dog has no focal uniform: it uses the camera matrices directly
     const xrOk = Math.abs(uf.y - fy) < 0.5 && Math.abs(uf.x - fy) < 0.5 && !e.renderer.xr.isPresenting;
     add('webxr', 'B.13-11 WebXR: walking around the dog; falls back without a reload', xrOk ? null : false,
       `not runnable on desktop (needs an Android phone). Checked only that the non-XR focal length is unchanged by the XR code: ${uf.y.toFixed(1)} px vs ${fy.toFixed(1)} expected; True AR chip hidden here: ${(document.querySelector('.cam-chip:last-child') as HTMLElement)?.hidden}`);

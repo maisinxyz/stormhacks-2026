@@ -23,10 +23,13 @@ export async function imagePng(bytes: Buffer) {
   } catch { throw new ApiError(422, 'invalid_image', 'Upload a valid PNG, JPEG, or WebP image'); }
 }
 export type ReferenceKind = 'drawing' | 'photo';
+/** 'plush' turns the pet into a soft toy before TRELLIS (play.md art direction); 'photoreal' is the original look. */
+export type ReferenceStyle = 'photoreal' | 'plush';
 /** TRELLIS reconstructs best from one standing animal, whole body in frame, on a plain background. */
-export function referencePrompt(species: Species, kind: ReferenceKind) {
+export function referencePrompt(species: Species, kind: ReferenceKind, style: ReferenceStyle = 'photoreal') {
   const animal = species === 'rodent' ? 'hamster' : species;
   const shot = `${species === 'bird' ? 'standing' : 'standing on all four legs'}, full body side view, entire animal visible, centered, plain light gray studio background, soft even lighting, sharp focus`;
+  if (style === 'plush') return `A soft plush toy version of ${kind === 'photo' ? `the ${animal} in this photo` : `the ${animal} in this drawing`}: stuffed animal with a big round head, big glossy black button eyes, a short muzzle, rounded body and short chunky legs, short fuzzy felt fur with visible stitching. Keep its exact coat colors, markings, ear shape and tail from the ${kind}. ${shot[0].toUpperCase()}${shot.slice(1)}, head on the right, single toy, no text.`;
   return kind === 'photo'
     ? `The same ${animal} from this photo, ${shot}, head on the right. Keep its exact fur colors, markings, face, eye color, body proportions and breed unchanged.`
     : `Transform this drawing into a photorealistic photo of a real ${animal}. Keep the same fur colors, markings, body shape and proportions from the drawing. ${shot[0].toUpperCase()}${shot.slice(1)}, single animal, no text.`;
@@ -56,10 +59,10 @@ export class MediaService {
     return imagePng(await this.providers.download(output.image.url, 16 * 1024 * 1024));
   }
   /** A standing, full-body, plain-background reference for image-to-3D, from a doodle or a photo of a sitting/lying pet. */
-  async reference(userId: string, imageId: string, species: Species, kind: ReferenceKind = 'drawing') {
+  async reference(userId: string, imageId: string, species: Species, kind: ReferenceKind = 'drawing', style: ReferenceStyle = 'photoreal') {
     const png = await this.imageBytes(userId, imageId);
     if (this.config.MOCK_GEN) return { imageId };
-    const prompt = referencePrompt(species, kind);
+    const prompt = referencePrompt(species, kind, style);
     if (!this.config.FAL_KEY) {
       // Free: FLUX.1 Kontext on an HF Space. Transparent cutouts become white; ~1 MP is the model's native size.
       const input = await sharp(png).flatten({ background: '#ffffff' }).resize(1024, 1024, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();

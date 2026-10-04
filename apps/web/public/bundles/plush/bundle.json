@@ -1,0 +1,42 @@
+{
+ "id": "default-plush",
+ "name": "Biscuit",
+ "species": "dog",
+ "splatUrl": "",
+ "rigUrl": "",
+ "weightsUrl": "",
+ "thumbnailUrl": "",
+ "plush": {
+  "bodyLength": 0.82,
+  "girth": 0.25,
+  "legLength": 0.24,
+  "headSize": 0.27,
+  "snout": 0.12,
+  "earShape": 0,
+  "earSize": 1,
+  "tailLength": 0.28,
+  "tailUp": 0.75,
+  "colors": {
+   "base": "#E3A857",
+   "belly": "#F7E3BC",
+   "ear": "#B9772F",
+   "muzzle": "#F7E3BC",
+   "paws": "#F7E3BC",
+   "tailTip": "#F7E3BC",
+   "nose": "#2A1C18",
+   "eye": "#120C0A"
+  }
+ },
+ "personality": {
+  "eager": 0.9,
+  "sassy": 0.2,
+  "anxious": 0.3,
+  "chatty": 0.5
+ },
+ "stats": {
+  "energy": 100,
+  "happiness": 80,
+  "hunger": 0
+ },
+ "createdAt": "2026-10-04T00:00:00.000Z"
+}
