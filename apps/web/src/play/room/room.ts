@@ -1,8 +1,6 @@
 // The Play room: a first-person toy playroom. The pet is an NPC that lives its own life here; the player walks around it,
 // talks to it (same commands as the camera view) and plays with it.
 import * as THREE from 'three';
-import type { PetBundle } from '@fetch/contracts';
-import { KNOWN_DOGS, knownBundle } from '../../engine/sdf/known';
 import type { CommandId } from '../commands';
 import { createRoomScene, ROOM_SPEC, type RoomScene } from '../scene';
 import { crunch, thump, whoosh } from '../sfx';
@@ -97,10 +95,6 @@ export class RoomView implements PlayView {
   // ---------- HUD ----------
   private buildHud() {
     const ctx = this.ctx!, fps = this.fps!, touch = matchMedia('(pointer: coarse)').matches;
-    const pets: { name: string; species: string; bundle: () => Promise<PetBundle> }[] = [
-      { name: 'Biscuit', species: 'dog', bundle: async () => (await fetch('/bundles/plush/bundle.json')).json() as Promise<PetBundle> },
-      ...KNOWN_DOGS.map(k => ({ name: k.name, species: k.species, bundle: async () => knownBundle(k) })),
-    ];
     const hud = this.hud = new RoomHud({
       back: () => ctx.exit(),
       camera: () => { fps.release(); ctx.switchTo('camera'); },
@@ -108,7 +102,6 @@ export class RoomView implements PlayView {
       use: down => this.primary(down),
       pick: id => this.pick(id),
       panel: () => fps.release(),
-      pets: pets.map(p => ({ name: `${p.species === 'cat' ? '\u{1f431}' : '\u{1f436}'} ${p.name}`, pick: () => void this.swapPet(p.bundle) })),
     }, touch);
     hud.el.insertAdjacentHTML('beforeend', "<div class=\"room-trays\">\n        <div class=\"room-tray room-treat-tray\">\n          <span class=\"room-tray-icon\">🍖</span>\n          <div class=\"room-tray-info\"><strong>Treat tray</strong><small>Give a snack</small></div>\n          <div class=\"room-treat-buttons\">\n            <button class=\"room-treat-btn\" data-action=\"treat\" title=\"Give a bone\" aria-label=\"Give your pet a bone\">🦴</button>\n            <button class=\"room-treat-btn\" data-action=\"treat\" title=\"Give a treat\" aria-label=\"Give your pet a treat\">🍖</button>\n          </div>\n        </div>\n        <div class=\"room-tray room-toy-tray\">\n          <span class=\"room-tray-icon\">🎾</span>\n          <div class=\"room-tray-info\"><strong>Toy box</strong><small>Play fetch</small></div>\n          <div class=\"room-toy-buttons\">\n            <button class=\"room-toy-btn\" data-action=\"toy\" title=\"Throw a ball\" aria-label=\"Throw a ball for your pet\">🎾</button>\n          </div>\n        </div>\n      </div>");
     hud.el.querySelectorAll('[data-action="treat"]').forEach(btn => btn.addEventListener('click', () => ctx.engine.feed()));
@@ -214,17 +207,6 @@ export class RoomView implements PlayView {
       this.tunnelOpenFor = 9;
     }
     e.perform([{ to: { x: S.x + side * half, z: S.z }, fast: true }, { to: { x: S.x - side * half, z: S.z }, fast: true }, ...(what === 'hoop' ? [{ clip: 'jump' }] : []), ...done]);
-  }
-
-  private async swapPet(load: () => Promise<PetBundle>) {
-    const ctx = this.ctx;
-    if (!ctx) return;
-    try {
-      const bundle = await load(), at = ctx.engine.getPetState();
-      await ctx.engine.loadPet(bundle); ctx.session.bundle = bundle;
-      ctx.engine.setQuality(ctx.session.quality); ctx.engine.setSplatDepthTest(true); ctx.engine.applyPetState(at); ctx.engine.flourish('sparkle');
-      this.hud?.owner(bundle.name);
-    } catch (err) { console.warn('could not switch pet', err); }
   }
 
   // ---------- voice commands (same tricks as the camera view) ----------

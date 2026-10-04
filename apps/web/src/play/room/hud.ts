@@ -18,7 +18,6 @@ export interface HudHandlers {
   pick(item: ItemId): void;
   /** Any panel opened: the game should give the mouse back. */
   panel(): void;
-  pets: { name: string; pick(): void }[];
 }
 
 export class RoomHud {
@@ -35,7 +34,6 @@ export class RoomHud {
       + `<div class="room-hotbar" role="toolbar" aria-label="Held item">${ITEMS.map((it, i) => `<button data-item="${it.id}" aria-label="${it.label}" aria-pressed="false">${it.icon}<small>${touch ? it.label : i + 1}</small></button>`).join('')}</div>`
       + `<button class="room-mic" data-action="mic" aria-label="Talk to your pet: tap to start, tap again to stop">🎤<small>${touch ? 'Talk' : 'T'}</small></button>`
       + (touch ? `<button class="room-use" data-action="use" aria-label="Use the held item: hold to throw harder">Pet</button>` : '')
-      + `<div class="room-pets"><button data-action="pets" aria-label="Choose a pet" aria-haspopup="true" aria-expanded="false">🐾<small>Pets</small></button><div class="room-dogs" data-pets hidden></div></div>`
       + `<div class="cam-voice" role="status" hidden></div><div class="cam-toast" role="status"></div>`
       + `<div class="room-coach hide" data-coach></div>`
       + `<div class="cam-help" data-ui="1" role="dialog" aria-label="Voice commands" hidden><h2>Say it to your pet</h2><p class="hint">Tap the mic${touch ? '' : ' (or press T)'}, then speak. It picks the closest command, so you do not need the exact words. Anything else gets a wag and hearts.</p><ul>${COMMANDS.filter(c => c.id !== 'stand').map(c => `<li>${c.label}</li>`).join('')}</ul><button type="button" class="primary" data-action="help-close">Got it</button></div>`;
@@ -48,14 +46,6 @@ export class RoomHud {
       let down = false;
       const set = (d: boolean) => (ev: Event) => { ev.preventDefault(); if (down !== d) { down = d; h.use(d); } };
       use.addEventListener('pointerdown', set(true)); use.addEventListener('pointerup', set(false)); use.addEventListener('pointercancel', set(false)); use.addEventListener('pointerleave', set(false));
-    }
-    const pets = this.q('[data-pets]'), petsBtn = this.q('[data-action="pets"]');
-    const openPets = (open: boolean) => { pets.hidden = !open; petsBtn.setAttribute('aria-expanded', String(open)); if (open) h.panel(); };
-    petsBtn.addEventListener('click', () => openPets(pets.hidden));
-    for (const p of h.pets) {
-      const b = document.createElement('button');
-      b.textContent = p.name; b.addEventListener('click', () => { openPets(false); p.pick(); });
-      pets.appendChild(b);
     }
   }
 
