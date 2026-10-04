@@ -158,17 +158,39 @@ export type ShellEvent =
   | { type: 'view.error'; view: PlayViewId; code: 'camera_denied' | 'camera_unavailable' | 'orientation_denied' | 'webgl_lost' | 'asset_failed'; message: string };
 ```
 
-Engine seams (added in the first two hours by Person A, used by both):
+Engine seams (all **built and merged**, `apps/web/src/engine/index.ts`):
 
 ```ts
-// Engine additions
-setView(v: 'room' | 'camera', opts?: { petScale?: number }): void; // swaps interaction mapping + camera ownership
-setExternalCamera(on: boolean): void;      // when true, Engine stops positioning this.camera; the view owns it
-get cameraRef(): THREE.PerspectiveCamera;  // so views can set pose/fov
-setOverlayScene(scene: THREE.Scene | null): void; // room geometry rendered before the splats (depth written)
-setGroundPlane(y: number): void;           // plane used by toWorld/hit-tests (default y=0)
-getPetState(): PetSession-compatible snapshot; applyPetState(s): void;
+// Shared play seams (Person A)
+setView(v: 'desk' | 'room' | 'camera', opts?: { petScale?: number }): void; // room 0.55, camera 0.45 by default
+setExternalCamera(on: boolean): void;       // the view owns engine.camera
+get cameraRef(): THREE.PerspectiveCamera;
+setOverlayScene(scene: THREE.Scene | null): void;  // room geometry rendered before the splats
+setGroundPlane(y: number): void;            // plane used by toWorld / hit-tests
+setSplatDepthTest(on: boolean): void;       // on in the Room, off in the camera view
+setFurnitureSpots(spots): void;
+claimGesture(pointerId: number): boolean; releaseGesture(pointerId: number): void;
+getPetState(); applyPetState(s): void;
+
+// Camera-view seams (Person B)
+placePet(x: number, z: number, walk?: boolean): void;   // ground point in metres; walk=true walks there, false teleports
+carryPet(x: number, z: number, drop?: boolean): void;   // finger-drag carry; drop=true settles it
+get travelling(): boolean;                              // on its way to a placePet target
+get petPosition(): THREE.Vector3;  get scaleNow(): number;  setPetScale(s: number): void;
+groundPoint(px: number, py: number): THREE.Vector3 | undefined;  // screen px -> active plane
+setLookAt(target: THREE.Vector3 | null): void;          // head turns toward a world point on top of any clip (B.6)
+react(kind: 'pet' | 'poke' | 'feed' | 'tap'): void;     // 'tap' = affectionate tap (wag + happiness); pokes map to it in the camera view
+feed(): boolean;                                        // feed the species' own food
+setTint(r, g, b): void; setShadowOpacity(o: number): void;  // ambient match (B.8)
+setGroundHeight(y: number): void;                       // real floor height from WebXR hit-test (B.5)
+renderNow(): void;                                      // synchronous render, for capture (B.9)
+get webgl(): THREE.WebGLRenderer;                       // for the WebXR session
+onFrame?: (t: number, frame?: XRFrame) => void;         // loop is renderer.setAnimationLoop, so it also runs inside a WebXR session
 ```
+
+**As built, the shell is Person A's** (`apps/web/src/play/session-shell.ts`, entry `src/play-entry.ts`, `camera.html`). The pet walks in world metres on the ground plane; the camera view reuses that model. `PlayContext` has `root` (which contains the engine canvas) and optional `emit`, not the `stage`/`background` fields drawn above. A view puts its background layer into `root` before the canvas, and the shell's `play-transition` overlay does the crossfade. `PlayView` gained two things the camera needs:
+- `prepare?(ctx)`, called synchronously inside the user's tap, before any await, so the iOS motion-permission prompt and the camera prompt keep their user gesture (the shell's transition delay would otherwise lose it).
+- `update(dt, frame?)`, where `frame` is set inside a WebXR session. A view's `enter()` may reject (for example the camera cannot start); the shell then re-enters the previous view and emits `view.error`.
 
 Dog world scale: the splat is authored about 1 unit tall. **Room view** scales the pet to about 0.55 m tall (a medium dog relative to the room). **Camera view** uses about 0.45 m (a believable pet next to a person holding a phone), adjustable by pinch. Both set it via `setView(..., { petScale })`, never by editing the bundle.
 
@@ -450,7 +472,7 @@ The existing `Interactions` window listeners keep working; Person B only needs t
 ### B.9 Capture (`capture.ts`)
 - The capture button draws the current video frame, then the engine canvas, into one offscreen 2D canvas (match the video's aspect) and exports `image/jpeg` (or png). The renderer must be rendered in the same task immediately before `drawImage` (or the engine created with `preserveDrawingBuffer` only during capture), otherwise the canvas reads back blank.
 - Output: `navigator.share({ files })` when available (mobile), otherwise a download. A brief shutter flash and a small thumbnail confirm the capture. Captures never include UI chrome.
-- Front camera: un-mirror the video draw so text/scene is not flipped, or mirror consistently with the live preview (decide and document; default: save un-mirrored).
+- Front camera: **decided: the photo is what-you-see.** The front-camera preview is mirrored, so the saved photo is mirrored too. Saving it un-mirrored would put the dog in a different place than it was on screen.
 - Video recording is a non-goal (a future `MediaRecorder` addition).
 
 ### B.10 Camera UI (`ui.ts`)
@@ -477,6 +499,19 @@ Minimal, social-camera style:
 | 14–17 | Capture (composite + share), ambient tint, contact shadow tuning, coach marks and error states. |
 | 17–20 | Crossfade with the Room, device performance pass (low preset), accessibility, edge cases (background/resume, rotation). |
 | 20+ (stretch) | WebXR tier on Android; film grain; polish. Device testing and rehearsal. |
+
+**Build status (desktop, fake video feed + simulated motion; not yet run on a phone):**
+
+| Section | Status |
+|---|---|
+| B.2–B.4 camera stack, gyro anchoring, tap-to-place, pinch, recenter | Built, checked on desktop |
+| B.5 WebXR tier | Written, never run (needs an Android phone) |
+| B.6 alive layer | Built; phone-jolt reaction needs a real motion sensor to check |
+| B.7 interactions, voice | Built; voice uses browser speech recognition, real speech not exercised |
+| B.8 tint and shadow | Built; film grain not built |
+| B.9 capture | Built; composite verified to contain the dog and no UI |
+| B.10 camera UI, coach mark, states | Built |
+| B.11 transition | Built in the shell (curtain crossfade, failed camera keeps the previous view); checked against a stand-in Room |
 
 ### B.13 Part B acceptance criteria
 - [ ] Pressing the camera button shows the rear camera full-screen and the dog on top of it within 1.5 s of permission being granted; there is no card, panel or modal around the camera.

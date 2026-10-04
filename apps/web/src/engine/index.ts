@@ -5,7 +5,7 @@ import { generatePet as runPipeline } from './pipeline/generate';
 import { Behavior, type BehaviorHost, type FurnitureSpot } from './behavior';
 import { Interactions } from './interactions';
 import { Needs, type Stats } from './needs';
-import { Toys } from './toys';
+import { BALL_R, Toys } from './toys';
 import { PeekScene } from './peek';
 import { Skeleton, type Bone } from './skeleton';
 import { Props, type Prop } from './props';
@@ -68,8 +68,7 @@ export class Engine implements PetEngine {
   private splat?: SplatMesh;
   private mode: Mode = 'work';
   private platforms: Platform[] = [];
-  private raf = 0;
-  onFrame?: (t: number) => void;
+  onFrame?: (t: number, frame?: XRFrame) => void;
 
   mount(canvas: HTMLCanvasElement, peekCanvas: HTMLCanvasElement) {
     this.peekCanvas = peekCanvas;
@@ -90,12 +89,11 @@ export class Engine implements PetEngine {
       canvas.style.pointerEvents = this.hitTest(e.clientX, e.clientY) || this.hitBall(e.clientX, e.clientY) ? 'auto' : 'none';
     });
     let prev = 0;
-    const loop = (t: number) => {
+    const loop = (t: number, frame?: XRFrame) => {
       const dt = t / 1000 - prev; prev = t / 1000;
       this.watchFps(dt);
-      this.raf = requestAnimationFrame(loop);
       this.resize();
-      this.onFrame?.(t / 1000);
+      this.onFrame?.(t / 1000, frame);
       this.toys?.step(Math.min(dt, 0.1));
       this.inter?.update(Math.min(dt, 0.1), t);
       this.updateLaser();
@@ -109,7 +107,7 @@ export class Engine implements PetEngine {
       }
       this.renderer.render(this.scene, this.camera);
     };
-    this.raf = requestAnimationFrame(loop);
+    this.renderer.setAnimationLoop(loop); // window rAF normally, the XR session's rAF while presenting
     this.bus.emit({ type: 'ENGINE_READY' });
   }
 
@@ -126,6 +124,7 @@ export class Engine implements PetEngine {
     this.peek = this.peekCanvas && new PeekScene(this.peekCanvas, PACKS[b.species], splat, weights, rig.bones);
     this.splat = new SplatMesh(splat, weights);
     this.splat.setBudget(BUDGET[this.quality]);
+    this.splat.uniforms.uTint.value.copy(this.tint);
     this.scene.add(this.splat.mesh);
     this.pack = PACKS[b.species];
     this.needs = new Needs(b.stats, s => this.statsCb?.(s));
@@ -138,11 +137,75 @@ export class Engine implements PetEngine {
     const o = this.beh!.update(dt), m = this.splat!.mesh;
     for (const b of this.bones) this.setBoneEuler(b.name, 0, 0, 0);
     for (const [n, e] of Object.entries(o.pose.bones)) this.setBoneEuler(n, e[0], e[1], e[2]);
-    m.position.set(o.x, o.y, o.z);
+    m.position.set(o.x, o.y + this.groundPlane, o.z); // groundPlane = real floor height under WebXR
     m.rotation.y = o.yaw;
     m.scale.setScalar(this.petScale);
     if (this.shadow) { this.shadow.position.set(o.x, this.groundPlane + 0.002, o.z); this.shadow.scale.setScalar(this.petScale); this.shadow.visible = m.visible; }
+    this.applyLook(dt, o.pose.bones.head);
   }
+
+  // ---- look-at layer (play.md B.6): head turns toward a world target on top of whatever clip is playing ----
+  private look = { target: null as THREE.Vector3 | null, yaw: 0, pitch: 0 };
+  /** World point the head should turn toward (e.g. the camera), or null to release. Clamped and smoothed. */
+  setLookAt(target: THREE.Vector3 | null) { this.look.target = target; }
+  private applyLook(dt: number, headPose?: [number, number, number]) {
+    const L = this.look, head = this.bones.find(b => b.name === 'head'), m = this.splat!.mesh;
+    let ty = 0, tp = 0;
+    const st = this.beh!.state;
+    if (L.target && head && st !== 'sleep' && st !== 'exit' && st !== 'working') {
+      m.updateMatrix();
+      const d = L.target.clone().applyMatrix4(m.matrix.clone().invert()).sub(new THREE.Vector3(...head.head)); // target in pet space, from the neck
+      ty = THREE.MathUtils.clamp(Math.atan2(d.x, d.z), -1.22, 1.22);                     // +-70deg
+      tp = THREE.MathUtils.clamp(-Math.atan2(d.y, Math.hypot(d.x, d.z)), -0.61, 0.61);   // +-35deg (x<0 raises the nose)
+    }
+    const k = Math.min(1, dt * 6);
+    L.yaw += (ty - L.yaw) * k; L.pitch += (tp - L.pitch) * k;
+    if (!head || (Math.abs(L.yaw) < 1e-3 && Math.abs(L.pitch) < 1e-3)) return;
+    const e = headPose ?? [0, 0, 0];
+    this.setBoneEuler('head', e[0] + L.pitch, e[1] + L.yaw, e[2]);
+  }
+
+  /** Splat colour multiplier (ambient match, play.md B.8). (1,1,1) = off. */
+  setTint(r: number, g: number, b: number) { this.splat?.uniforms.uTint.value.set(r, g, b); this.tint.set(r, g, b); }
+  private tint = new THREE.Vector3(1, 1, 1);
+  setShadowOpacity(o: number) { if (this.shadow) (this.shadow.material as THREE.MeshBasicMaterial).opacity = o; }
+  /** Floor height of the ground plane the pet stands on (WebXR hit-test supplies the real floor). */
+  setGroundHeight(y: number) { this.setGroundPlane(y); }
+  /** Feed the species' own food (action chip / voice "treat"). */
+  feed() {
+    const item = this.pack?.foods[0];
+    if (!item || !this.feedItem(item)) return false;
+    this.bus.emit({ type: 'FEED', item });
+    this.beh?.react('feed');
+    return true;
+  }
+  /** Render one frame right now (capture reads the canvas back in the same task, play.md B.9). */
+  renderNow() { this.renderer.render(this.scene, this.camera); }
+  /** The WebGL renderer, for WebXR session setup (play.md B.5). */
+  get webgl() { return this.renderer; }
+
+  // ---- Camera-view seams (play.md B): the pet walks in world metres on the ground plane (Person A's model) ----
+  setPetScale(s: number) { this.petScale = s; }
+  get scaleNow() { return this.petScale; }
+  private walkTo?: { x: number; z: number };
+  /** Put the pet at a ground point (metres). walk=true walks there with the walk/run cycle; false teleports. */
+  placePet(x: number, z: number, walk = true) {
+    if (!walk) { this.walkTo = undefined; this.beh?.applySnapshot({ x, z, y: 0 }); return; }
+    this.walkTo = { x, z };
+    this.beh?.pointTo(x, z);
+  }
+  /** Pick the pet up and carry it (finger drag); call with drop=true on release and it walks off the last bit and settles. */
+  carryPet(x: number, z: number, drop = false) { this.walkTo = drop ? { x, z } : undefined; this.beh?.dragTo(x, z, drop); }
+  /** True while the pet is on its way to a placePet target. */
+  get travelling() {
+    const w = this.walkTo, p = this.beh;
+    if (!w || !p) return false;
+    if (Math.hypot(p.x - w.x, p.z - w.z) < 0.08) { this.walkTo = undefined; return false; }
+    return true;
+  }
+  get petPosition() { return this.splat?.mesh.position.clone() ?? new THREE.Vector3(); }
+  /** Screen px -> point on the active plane (desk: z=0 stage; room/camera: ground). */
+  groundPoint(px: number, py: number) { return this.toWorld(px, py); }
 
   // World position of the species' carry socket (mouth / cheek / talons), from the posed bone.
   private socketWorld(): THREE.Vector3 | undefined {
@@ -192,7 +255,8 @@ export class Engine implements PetEngine {
       hitBall: (x: number, y: number) => this.hitBall(x, y),
       toWorld: (x: number, y: number) => this.toWorld(x, y),
       emit: (e: BusEvent) => this.bus.emit(e),
-      react: (k: 'pet' | 'poke' | 'feed') => this.beh?.react(k),
+      // camera view: a tap is affection, not a poke (look at the user + wag), see play.md B.7
+      react: (k: 'pet' | 'poke' | 'feed') => this.beh?.react(k === 'poke' && this.view === 'camera' ? 'tap' : k),
       petted: (i: number, dt: number) => this.needs?.petted(i, dt),
       feed: (item: FeedItem) => this.feedItem(item),
       holdBall: (x: number, y: number) => this.toys?.hold(x, y),
@@ -283,7 +347,7 @@ export class Engine implements PetEngine {
   /** F2 signals mic-open/close (not in the frozen BusEvent contract; propose adding a MIC event). */
   setListening(on: boolean) { this.listeningPending = on; this.beh?.setListening(on); }
   /** Pointer reactions (PET_STROKE/POKE/FEED are detected in 1.8; this is the reaction half). */
-  react(kind: 'pet' | 'poke' | 'feed') { this.beh?.react(kind); }
+  react(kind: 'pet' | 'poke' | 'feed' | 'tap') { this.beh?.react(kind); }
   /** Play a verb's composed animation on the visible pet (peek scene / previews). */
   previewVerb(v: Parameters<Behavior['previewVerb']>[0], mood: Mood = 'neutral', secs = 3, prop?: Prop) { this.beh?.previewVerb(v, mood, secs, prop); }
   get state() { return this.beh?.state; }
@@ -339,6 +403,7 @@ export class Engine implements PetEngine {
   }
 
   private resize() {
+    if (this.renderer.xr.isPresenting) return;
     const c = this.renderer.domElement, w = c.clientWidth, h = c.clientHeight;
     if (c.width !== Math.round(w * this.pr) || c.height !== Math.round(h * this.pr)) {
       this.renderer.setPixelRatio(this.pr);
@@ -348,7 +413,7 @@ export class Engine implements PetEngine {
     }
   }
 
-  dispose() { cancelAnimationFrame(this.raf); this.renderer.dispose(); }
+  dispose() { this.renderer.setAnimationLoop(null); this.renderer.dispose(); }
 
   // --- PetEngine surface; F1 slice 0-5h implements loading/skinning only. TODOs land in later slices. ---
   setMode(mode: Mode) { this.mode = mode; this.beh?.setMode(mode); }

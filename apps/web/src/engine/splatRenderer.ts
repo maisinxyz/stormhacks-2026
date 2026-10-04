@@ -62,12 +62,13 @@ void main() {
 
 const frag = /* glsl */ `
 precision highp float;
+uniform vec3 uTint;
 in vec4 vColor; in vec2 vPos; out vec4 outColor;
 void main() {
   float A = -dot(vPos, vPos);
   if (A < -4.) discard;
   float a = exp(A) * vColor.a;
-  outColor = vec4(vColor.rgb * a, a);
+  outColor = vec4(vColor.rgb * uTint * a, a);
 }`;
 
 export class SplatMesh {
@@ -77,6 +78,7 @@ export class SplatMesh {
     uViewport: { value: new THREE.Vector2(1, 1) },
     uFocal: { value: new THREE.Vector2(1, 1) },
     uData: { value: null as THREE.DataTexture | null },
+    uTint: { value: new THREE.Vector3(1, 1, 1) },
   };
   count: number;
   readonly total: number;
@@ -149,11 +151,18 @@ export class SplatMesh {
   setDepthTest(on: boolean) { const material = this.mesh.material as THREE.RawShaderMaterial; material.depthTest = on; material.depthWrite = false; material.needsUpdate = true; }
 
   update(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera) {
+    // Focal length in pixels from the projection actually used to render. In a WebXR session that is the XR view's
+    // projection + viewport, not the page camera's fov and canvas size.
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    let cam: THREE.PerspectiveCamera = camera;
+    if (renderer.xr.isPresenting) {
+      const xc = renderer.xr.getCamera().cameras[0];
+      if (xc) { cam = xc; size.set(xc.viewport.z, xc.viewport.w); }
+    }
     this.uniforms.uViewport.value.copy(size);
-    const fy = size.y / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
-    this.uniforms.uFocal.value.set(fy, fy);
-    const dir = camera.getWorldDirection(new THREE.Vector3()).transformDirection(this.mesh.matrixWorld.clone().invert()); // sort in model space
+    const P = cam.projectionMatrix.elements;
+    this.uniforms.uFocal.value.set(P[0] * size.x / 2, P[5] * size.y / 2);
+    const dir = cam.getWorldDirection(new THREE.Vector3()).transformDirection(this.mesh.matrixWorld.clone().invert()); // sort in model space
     if (dir.distanceTo(this.lastDir) > 0.01 && performance.now() - this.lastSortAt > 50) { this.lastDir.copy(dir); this.sort(dir); }
   }
 

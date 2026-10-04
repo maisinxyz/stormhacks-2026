@@ -2,8 +2,10 @@
 // stacked on top (transparent), and the phone's orientation drives the 3D camera so the dog stays put in the room.
 import * as THREE from 'three';
 import { parseCommand, PushToTalk } from '../voice';
+import type { OrientationStatus } from './pose';
 import type { PlayContext, PlayView, PlayViewId } from '../types';
 import { Alive } from './lookat';
+import './camera.css';
 import { composite, deliver } from './capture';
 import { PhonePose } from './pose';
 import { CameraStream, StreamError } from './stream';
@@ -36,9 +38,21 @@ export class CameraView implements PlayView {
   private wasPinch = false;
   private holdTimer = 0;
   // a pointer that started on the pet (may turn into a carry)
-  private petPtr?: { id: number; x0: number; y0: number; carrying: boolean };
+  private petPtr?: { id: number; x0: number; y0: number; carrying: boolean; last?: THREE.Vector3 };
 
-  async enter(ctx: PlayContext, from?: PlayViewId) {
+  private pending?: { orient: Promise<OrientationStatus>; cam: Promise<void> };
+
+  /** Shell calls this synchronously inside the user's tap, before any await: iOS motion permission and the camera
+   *  prompt both need that gesture, and the shell's own transition delay would otherwise lose it. */
+  prepare(ctx: PlayContext) {
+    this.init(ctx);
+    const orient = this.pose.start();
+    const cam = this.stream.start();
+    cam.catch(() => { /* surfaced when begin() awaits it */ });
+    this.pending = { orient, cam };
+  }
+
+  private init(ctx: PlayContext) {
     this.ctx = ctx;
     const e = ctx.engine;
     if (!this.ui) {
@@ -64,11 +78,21 @@ export class CameraView implements PlayView {
       e.on('POKE', () => { if (this.entered) this.alive.focus(3); });
       e.on('PET_STROKE', () => { if (this.entered) this.alive.focus(1.5); });
     }
+  }
+
+  async enter(ctx: PlayContext, from?: PlayViewId) {
+    this.init(ctx);
+    const e = ctx.engine;
     this.entered = true;
-    ctx.background.appendChild(this.stream.video); // video under the transparent engine canvas
+    ctx.root.insertBefore(this.stream.video, ctx.canvas); // video under the transparent engine canvas
     ctx.root.appendChild(this.ui.el);
     e.setView('camera', { petScale: AR_PET_SCALE * ctx.session.scale });
-    e.placePet(ctx.session.position.x, ctx.session.position.z, false);
+    e.setExternalCamera(true);       // this view owns the 3D camera (gyro pose)
+    e.setOverlayScene(null);         // no room geometry
+    e.setFurnitureSpots([]);
+    e.setSplatDepthTest(false);      // no real depth in AR: the dog always draws over the video
+    e.setGroundPlane(0);
+    e.placePet(0, 0, false);         // the dog starts at the anchor, about 2 m in front of the user
     this.pose.update(0);
     window.addEventListener('pointerdown', this.onDown);
     window.addEventListener('pointermove', this.onMove);
@@ -76,17 +100,19 @@ export class CameraView implements PlayView {
     window.addEventListener('pointercancel', this.onUp);
     // iOS only grants motion access inside a tap. Coming from the Room's camera button we are inside one;
     // on a cold open we are not, so ask for a tap first.
-    const needsTap = !from && typeof (window.DeviceOrientationEvent as { requestPermission?: unknown } | undefined)?.requestPermission === 'function';
+    const needsTap = !this.pending && typeof (window.DeviceOrientationEvent as { requestPermission?: unknown } | undefined)?.requestPermission === 'function';
     if (needsTap) this.ui.prompt('Your dog is waiting in the camera.', [{ label: 'Open camera', primary: true, run: () => void this.begin() }]);
     else await this.begin(!!from); // from another view: a camera failure rejects so the shell keeps that view (B.11)
   }
 
   private async begin(rethrow = false) {
     this.ui.clearPrompt();
-    // Ask for motion first: it must be the first await in the tap on iOS.
-    const orient = await this.pose.start();
+    // Started inside the tap by prepare() when we come from the Room; otherwise start them now (the tap prompt calls us).
+    const p = this.pending ?? { orient: this.pose.start(), cam: this.stream.start() };
+    this.pending = undefined;
+    const orient = await p.orient;
     try {
-      await this.stream.start();
+      await p.cam;
     } catch (err) {
       if (rethrow) throw err instanceof StreamError ? err : new StreamError('camera_unavailable', String(err));
       this.fail(err); return;
@@ -95,7 +121,7 @@ export class CameraView implements PlayView {
     this.pose.recenter();
     this.alive.enter(); // greeting: faces the user, wags
     if (orient === 'denied') {
-      this.ctx.emit({ type: 'view.error', view: 'camera', code: 'orientation_denied', message: 'Motion access denied' });
+      this.ctx.emit?.({ type: 'view.error', view: 'camera', code: 'orientation_denied', message: 'Motion access denied' });
       this.ui.toast('Motion access is off, so turning the phone will not move the dog.', 6000);
     } else if (orient === 'mouse' || orient === 'unavailable') {
       this.ui.toast(orient === 'mouse' ? 'Drag to look around (simulated motion).' : 'No motion sensor here. Drag to look around.');
@@ -124,7 +150,7 @@ export class CameraView implements PlayView {
   private fail(err: unknown) {
     const e = err instanceof StreamError ? err : new StreamError('camera_unavailable', String(err));
     this.live = false;
-    this.ctx.emit({ type: 'view.error', view: 'camera', code: e.code, message: e.message });
+    this.ctx.emit?.({ type: 'view.error', view: 'camera', code: e.code, message: e.message });
     this.ui.prompt(e.code === 'camera_denied' ? 'Camera access is blocked. Allow it in your browser settings, then try again.' : e.message, [
       { label: 'Try again', primary: true, run: () => void this.begin() },
       { label: 'Back', run: () => this.ctx.switchTo('room') },
@@ -148,8 +174,7 @@ export class CameraView implements PlayView {
     this.stream.video.remove();
     this.ui.el.remove();
     this.live = this.entered = false;
-    const p = this.ctx.engine.petPosition; // hand the pet's place back to the session
-    this.ctx.session.position = { x: p.x, z: p.z };
+    this.pending = undefined;
   }
 
   update(dt: number, frame?: XRFrame) {
@@ -228,7 +253,10 @@ export class CameraView implements PlayView {
     const pp = this.petPtr;
     if (pp && pp.id === e.pointerId) {
       if (!pp.carrying && Math.hypot(e.clientX - pp.x0, e.clientY - pp.y0) > CARRY_PX) pp.carrying = true;
-      if (pp.carrying) this.place(e.clientX, e.clientY); // the dog follows the finger along the floor
+      if (pp.carrying) { // the dog follows the finger along the floor
+        const g = this.groundAt(e.clientX, e.clientY);
+        if (g) { pp.last = g; this.ctx.engine.carryPet(g.x, g.z); }
+      }
       return;
     }
     const p = this.pts.get(e.pointerId);
@@ -246,7 +274,12 @@ export class CameraView implements PlayView {
   };
 
   private onUp = (e: PointerEvent) => {
-    if (this.petPtr?.id === e.pointerId) { this.petPtr = undefined; return; } // dropped: it walks the rest of the way and settles
+    if (this.petPtr?.id === e.pointerId) { // dropped: it settles where it was put down
+      const g = this.petPtr.last;
+      if (this.petPtr.carrying && g) this.ctx.engine.carryPet(g.x, g.z, true);
+      this.petPtr = undefined;
+      return;
+    }
     const p = this.pts.get(e.pointerId);
     if (!p) return;
     this.pts.delete(e.pointerId);

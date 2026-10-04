@@ -49,7 +49,7 @@ export class Alive {
 
     // 3. out of frame for a while: trot back into view and greet
     const p = e.petPosition;
-    p.y += 0.2 * e.petScale;
+    p.y += 0.2 * e.scaleNow;
     const ndc = p.project(e.camera);
     const out = ndc.z > 1 || Math.abs(ndc.x) > 1.05 || Math.abs(ndc.y) > 1.1;
     this.outT = out && !e.travelling ? this.outT + dt : 0;

@@ -73,8 +73,9 @@ export class Behavior {
     this.start(this.intent(name, id, i === 'sit' || i === 'stay' || i === 'play_dead' || i === 'hide'), 'intent');
   }
 
-  react(kind: 'pet' | 'poke' | 'feed') {
+  react(kind: 'pet' | 'poke' | 'feed' | 'tap') {
     if (kind === 'pet' && this.state === 'reaction') return; // stroke events repeat; don't restart the clip
+    if (kind === 'tap') { this.needs.petted(1, 0.3); kind = 'pet'; } // friendly tap: happiness bump + the species' petting reaction
     if (this.state === 'exit' || this.state === 'working' || this.state === 'return' || this.state === 'approval') return;
     this.start(this.reaction(this.pack.reactions[kind]), 'reaction');
   }
