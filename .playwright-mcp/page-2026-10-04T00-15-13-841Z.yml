@@ -1,0 +1,6 @@
+- generic [ref=e3]:
+  - text: "dog | bird:"
+  - link "dog" [ref=e4] [cursor=pointer]:
+    - /url: "?pet=dog"
+  - link "bird" [ref=e5] [cursor=pointer]:
+    - /url: "?pet=bird"

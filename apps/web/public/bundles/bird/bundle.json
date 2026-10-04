@@ -1,0 +1,21 @@
+{
+ "id": "demo-bird",
+ "name": "bird",
+ "species": "bird",
+ "splatUrl": "/bundles/bird/pet.splat",
+ "rigUrl": "/bundles/bird/rig.json",
+ "weightsUrl": "/bundles/bird/weights.bin",
+ "thumbnailUrl": "",
+ "personality": {
+  "eager": 0.5,
+  "sassy": 0.5,
+  "anxious": 0.5,
+  "chatty": 0.5
+ },
+ "stats": {
+  "energy": 100,
+  "happiness": 80,
+  "hunger": 0
+ },
+ "createdAt": "2026-10-04T00:14:58.975Z"
+}
