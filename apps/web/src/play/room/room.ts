@@ -11,6 +11,7 @@ import type { PlayContext, PlayView } from '../types';
 import { FirstPerson } from './fps';
 import { ITEMS, RoomHud, type ItemId } from './hud';
 import { ROOM_SPOTS } from './spots';
+import { Toys3D } from './toys3d';
 
 const PET_SCALE = 0.65;       // a little bigger than the old orbit view: the player now stands next to it
 const NOTICE = 3.2;           // metres: closer than this, the pet looks at the player
@@ -19,7 +20,7 @@ const FOLLOW_GAP = 1.3, FOLLOW_SLACK = 0.5; // "follow me": stay this close, sta
 
 export class RoomView implements PlayView {
   readonly id = 'room' as const;
-  private ctx?: PlayContext; private room?: RoomScene; private fps?: FirstPerson; private hud?: RoomHud; private talk?: Talk;
+  private ctx?: PlayContext; private room?: RoomScene; private fps?: FirstPerson; private hud?: RoomHud; private talk?: Talk; private toys?: Toys3D;
   private item: ItemId = 'hand';
   private following = false; private followT = 0;
   private fetches = 0; private tricks = 0;
@@ -33,6 +34,9 @@ export class RoomView implements PlayView {
     e.setGroundPlane(0); e.setOverlayScene(room.scene); e.setRoomColliders(room.colliders);
     e.setSplatDepthTest(true); e.setFurnitureSpots(ROOM_SPOTS);
     e.applyPetState(ctx.session.position ? { ...ctx.session.position, heading: ctx.session.heading } : { x: 0, z: 0 });
+    this.toys = new Toys3D(e, room.scene, room.colliders, () => this.fps!.position);
+    this.toys.onFetched = () => this.hud?.counts(++this.fetches, this.tricks);
+    this.fps.onPrimary = down => this.primary(down);
     this.buildHud();
     window.addEventListener('keydown', this.onKey);
   }
@@ -42,9 +46,14 @@ export class RoomView implements PlayView {
     if (!e || !fps) return;
     fps.update(dt);
     this.room?.update(dt);
-    // the pet notices the player: its head follows them when they are close
+    const toys = this.toys!;
+    e.camera.updateMatrixWorld();
+    toys.hold(this.item === 'ball' || this.item === 'frisbee' ? this.item : undefined, e.camera);
+    toys.update(dt);
+    this.hud?.charge(toys.charge);
+    // the pet watches a toy in the air, and otherwise notices the player when they are close
     const pet = e.petPosition, gap = Math.hypot(pet.x - fps.position.x, pet.z - fps.position.z);
-    e.setLookAt(gap < NOTICE ? fps.position : null);
+    e.setLookAt(toys.attention ?? (gap < NOTICE ? fps.position : null));
     if (this.following && (this.followT -= dt) <= 0) {
       this.followT = 0.35;
       if (gap > FOLLOW_GAP + FOLLOW_SLACK) { const k = FOLLOW_GAP / gap; e.placePet(fps.position.x + (pet.x - fps.position.x) * k, fps.position.z + (pet.z - fps.position.z) * k, true); }
@@ -62,6 +71,7 @@ export class RoomView implements PlayView {
     ctx.engine.setLookAt(null); ctx.engine.setListening(false); ctx.engine.setPointerInteractions(true);
     ctx.engine.setFurnitureSpots([]); ctx.engine.setRoomColliders([]); ctx.engine.setOverlayScene(null);
     this.following = false;
+    this.toys?.cancel(); this.toys = undefined;
     this.talk?.dispose(); this.talk = undefined;
     this.fps?.dispose(); this.fps = undefined;
     this.room?.dispose(); this.room = undefined;
@@ -79,6 +89,7 @@ export class RoomView implements PlayView {
       back: () => ctx.exit(),
       camera: () => { fps.release(); ctx.switchTo('camera'); },
       mic: () => this.talk?.toggle(),
+      use: down => this.primary(down),
       pick: id => this.pick(id),
       panel: () => fps.release(),
       pets: pets.map(p => ({ name: p.name, pick: () => void this.swapPet(p.bundle) })),
@@ -106,6 +117,17 @@ export class RoomView implements PlayView {
   };
   private pick(id: ItemId) { this.item = id; this.hud?.item(id); }
 
+  /** The main button (mouse, or the on-screen action button): what it does depends on the held item. */
+  private primary(down: boolean) {
+    const toys = this.toys, fps = this.fps;
+    if (!toys || !fps) return;
+    if (this.item === 'ball' || this.item === 'frisbee') {
+      if (!down) toys.release(fps.forward());
+      else if (!toys.press(this.item)) this.hud?.toast(`${this.ctx!.session.bundle.name} has the ${toys.out}. It will bring it back.`, 2200);
+      else this.following = false;
+    }
+  }
+
   private async swapPet(load: () => Promise<PetBundle>) {
     const ctx = this.ctx;
     if (!ctx) return;
@@ -121,13 +143,14 @@ export class RoomView implements PlayView {
   private run(id: CommandId) {
     const e = this.ctx!.engine, fps = this.fps!;
     this.following = id === 'follow';
+    this.toys?.cancel(); // a command interrupts a fetch: the toy goes back to the hand
     this.hud?.counts(this.fetches, ++this.tricks);
     if (id === 'follow') { this.followT = 0; this.hud?.toast('Following you. Say another command to stop.', 2500); return; }
     e.perform(commandSteps(id, { engine: e, eye: fps.position, forward: fps.forward(), reach: [0.8, 12], hold: HOLD_SECS, woof: () => this.woof() }));
   }
   private love() {
     const e = this.ctx!.engine, eye = this.fps!.position;
-    this.following = false;
+    this.following = false; this.toys?.cancel();
     e.perform([{ call: () => e.faceToward(eye.x, eye.z) }, { call: () => e.flourish('heart') }, { clip: 'wag', secs: 2 }]);
   }
   private woof() {

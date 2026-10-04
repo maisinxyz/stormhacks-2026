@@ -450,6 +450,10 @@ export class Engine implements PetEngine {
   /** Stat changes for F2 to persist via PATCH /pets/:id (not in the frozen BusEvent contract). */
   onStats(cb: (s: Stats) => void) { this.statsCb = cb; }
   get stats() { return this.needs?.stats; }
+  /** World position of the pet's mouth (carry socket), for a toy it is carrying in a 3D room. */
+  carryPoint() { return this.beh && this.splat?.mesh.visible ? this.socketWorld() : undefined; }
+  /** A game was played with the pet (fetch, hoop): happiness up, a little energy spent. */
+  played(amount = 3) { this.needs?.played(amount); }
 
   private syncToyPlatforms() {
     if (!this.toys || !this.renderer) return;
