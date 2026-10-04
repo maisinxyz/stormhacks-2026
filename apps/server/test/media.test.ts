@@ -8,7 +8,7 @@ import { buildApp } from '../src/app.js';
 import { readConfig } from '../src/config.js';
 import { mockPly } from '../src/media/mock.js';
 import { normalizePly, validatePly } from '../src/media/service.js';
-import { Providers } from '../src/media/providers.js';
+import { Providers, spaceHost, type Gradio } from '../src/media/providers.js';
 import { parsePly } from '../../web/src/engine/pipeline/gaussians.js';
 import { UserWork } from '../src/media/user-work.js';
 
@@ -285,4 +285,130 @@ test('temporary provider outages keep an existing prediction pollable until it r
   assert.equal((await app.inject({ url: jobPath })).json().status, 'pending');
   recovering = true;
   assert.equal((await app.inject({ url: jobPath })).json().status, 'done');
+});
+
+const SPACE_FILES = 'https://trellis-community-trellis.hf.space/gradio_api/file=/tmp/gradio/';
+const QUOTA = 'You have exceeded your ZeroGPU quota (120s requested vs. 157s left). Try again in 23:53:46. Authenticate with a Hugging Face token for more quota - https://huggingface.co/settings/tokens';
+/** TRELLIS Space layout: x,y,z,nx,ny,nz,f_dc_0..2,opacity,scale_0..2,rot_0..3. */
+function trellisPly(n = 2000) {
+  const names = ['x', 'y', 'z', 'nx', 'ny', 'nz', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity', 'scale_0', 'scale_1', 'scale_2', 'rot_0', 'rot_1', 'rot_2', 'rot_3'];
+  const header = Buffer.from(`ply\nformat binary_little_endian 1.0\nelement vertex ${n}\n${names.map(p => `property float ${p}\n`).join('')}end_header\n`);
+  const data = Buffer.alloc(n * names.length * 4);
+  for (let i = 0; i < n; i++) {
+    const o = i * names.length * 4;
+    for (let k = 0; k < 3; k++) data.writeFloatLE(Math.sin(i * (k + 1)) * .5, o + k * 4);
+    for (let k = 10; k < 13; k++) data.writeFloatLE(-4, o + k * 4);
+    data.writeFloatLE(1, o + 13 * 4);
+  }
+  return Buffer.concat([header, data]);
+}
+/** Fake @gradio/client: each endpoint handler returns the prediction's data array. */
+function fakeGradio(handlers: Record<string, (data: any) => unknown[] | Promise<unknown[]>> = {}) {
+  const calls: { endpoint: string; data: any }[] = []; let connects = 0;
+  const gradio: Gradio = {
+    handle_file: blob => ({ blob }),
+    Client: { connect: async space => {
+      assert.equal(space, 'trellis-community/TRELLIS'); connects++;
+      return { predict: async (endpoint, data) => { calls.push({ endpoint, data }); return { data: await (handlers[endpoint] ?? (() => []))(data) }; }, close() {} };
+    } }
+  };
+  return { gradio, calls, connects: () => connects };
+}
+const spaceFetcher = (png: () => Buffer, ply: Buffer = trellisPly()): typeof fetch => async input => {
+  const url = String(input);
+  if (url === `${SPACE_FILES}pre.png`) return new Response(new Uint8Array(png()));
+  if (url === `${SPACE_FILES}sample.ply`) return new Response(new Uint8Array(ply));
+  throw new Error(`Unexpected URL ${url}`);
+};
+const spaceHandlers = { '/preprocess_image': () => [{ url: `${SPACE_FILES}pre.png`, path: '/tmp/gradio/pre.png' }], '/extract_gaussian': () => [{ url: `${SPACE_FILES}sample.ply` }, `${SPACE_FILES}sample.ply`] };
+async function settle(app: import('fastify').FastifyInstance, path: string) {
+  for (let i = 0; i < 300; i++) {
+    const r = (await app.inject({ url: path })).json();
+    if (r.status !== 'pending') return r;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  throw new Error('job stayed pending');
+}
+
+test('image-to-3d provider defaults to the free HF Space unless Replicate is configured', () => {
+  assert.equal(readConfig({}).IMAGE_TO_3D_PROVIDER, 'hf');
+  assert.equal(readConfig({ REPLICATE_API_TOKEN: 'r8' }).IMAGE_TO_3D_PROVIDER, 'replicate');
+  assert.equal(readConfig({ REPLICATE_API_TOKEN: 'r8', IMAGE_TO_3D_PROVIDER: 'hf' }).IMAGE_TO_3D_PROVIDER, 'hf');
+  assert.equal(readConfig({}).GEN_TIMEOUT_MS, 300000);
+  assert.equal(spaceHost('trellis-community/TRELLIS'), 'trellis-community-trellis.hf.space');
+  assert.throws(() => readConfig({ HF_TRELLIS_SPACE: 'https://evil.example' }));
+});
+
+test('free HF TRELLIS jobs run in the background and store a validated Gaussian PLY (1 and 3 images)', async t => {
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+  let png!: Buffer;
+  const fake = fakeGradio({ ...spaceHandlers, '/generate_and_extract_glb': async () => { await gate; return [{}, {}, {}]; } });
+  const f = await fixture(t, { MOCK_GEN: '0' }, spaceFetcher(() => png)); png = f.png;
+  f.context.media.providers.gradio = fake.gradio;
+  const imageId = (await f.form('/uploads', { image: png })).json().imageId;
+  const start = await f.app.inject({ method: 'POST', url: '/gen/image-to-3d', payload: { imageIds: [imageId], species: 'cat' } });
+  assert.equal(start.statusCode, 200, start.body);
+  const jobPath = `/gen/jobs/${start.json().jobId}`;
+  assert.deepEqual((await f.app.inject({ url: jobPath })).json(), { status: 'pending' });
+  release();
+  const done = await settle(f.app, jobPath); assert.equal(done.status, 'done', JSON.stringify(done));
+  assert.deepEqual(fake.calls.map(c => c.endpoint), ['/start_session', '/preprocess_image', '/generate_and_extract_glb', '/extract_gaussian']);
+  const gen = fake.calls[2].data; assert.deepEqual(gen.multiimages, []); assert.equal(gen.ss_sampling_steps, 12); assert.ok(gen.image.blob instanceof Blob);
+  const url = new URL(done.splatUrl); const ply = await f.app.inject({ url: url.pathname + url.search });
+  validatePly(ply.rawPayload); assert.equal(parsePly(new Uint8Array(ply.rawPayload).buffer).n, 2000);
+  fake.calls.length = 0;
+  const multi = await f.app.inject({ method: 'POST', url: '/gen/image-to-3d', payload: { imageIds: [imageId, imageId, imageId], species: 'dog' } });
+  assert.equal((await settle(f.app, `/gen/jobs/${multi.json().jobId}`)).status, 'done');
+  assert.deepEqual(fake.calls.map(c => c.endpoint), ['/start_session', '/preprocess_image', '/preprocess_image', '/preprocess_image', '/lambda_1', '/generate_and_extract_glb', '/extract_gaussian']);
+  assert.equal(fake.calls[5].data.multiimages.length, 3); assert.equal(fake.connects(), 2);
+});
+
+test('HF ZeroGPU quota fails the job with gen_quota and retryAfter, and segment answers 429 without calling the Space', async t => {
+  const fake = fakeGradio({ ...spaceHandlers, '/generate_and_extract_glb': () => { throw { type: 'status', stage: 'error', message: QUOTA }; } });
+  let png!: Buffer;
+  const f = await fixture(t, { MOCK_GEN: '0' }, spaceFetcher(() => png)); png = f.png;
+  f.context.media.providers.gradio = fake.gradio;
+  const imageId = (await f.form('/uploads', { image: png })).json().imageId;
+  const start = await f.app.inject({ method: 'POST', url: '/gen/image-to-3d', payload: { imageIds: [imageId], species: 'dog' } });
+  const failed = await settle(f.app, `/gen/jobs/${start.json().jobId}`);
+  assert.equal(failed.status, 'failed'); assert.equal(failed.error, 'gen_quota');
+  assert.ok(failed.retryAfter > 23 * 3600 && failed.retryAfter <= 23 * 3600 + 53 * 60 + 46, JSON.stringify(failed));
+  const before = fake.calls.length;
+  const seg = await f.form('/gen/segment', { image: png });
+  assert.equal(seg.statusCode, 429, seg.body); assert.equal(seg.json().code, 'gen_quota'); assert.ok(Number(seg.headers['retry-after']) > 0);
+  assert.equal(fake.calls.length, before);
+});
+
+test('HF runs time out as gen_timeout, and a pending HF job orphaned by a restart becomes gen_interrupted', async t => {
+  const fake = fakeGradio({ ...spaceHandlers, '/generate_and_extract_glb': () => new Promise(() => {}) });
+  let png!: Buffer;
+  const f = await fixture(t, { MOCK_GEN: '0', GEN_TIMEOUT_MS: '1000' }, spaceFetcher(() => png)); png = f.png;
+  f.context.media.providers.gradio = fake.gradio;
+  const imageId = (await f.form('/uploads', { image: png })).json().imageId;
+  const payload = { imageIds: [imageId], species: 'dog' };
+  const timed = (await f.app.inject({ method: 'POST', url: '/gen/image-to-3d', payload })).json();
+  assert.equal((await settle(f.app, `/gen/jobs/${timed.jobId}`)).error, 'gen_timeout');
+  const orphan = (await f.app.inject({ method: 'POST', url: '/gen/image-to-3d', payload })).json();
+  assert.equal((await f.app.inject({ url: `/gen/jobs/${orphan.jobId}` })).json().status, 'pending');
+  await f.app.close();
+  const restarted = await buildApp({ config: f.config, logger: false, requireUser: async req => { req.user = { id: 'alice', name: 'Alice', createdAt: new Date().toISOString() }; } });
+  f.closeLater.push(() => restarted.app.close());
+  assert.deepEqual((await restarted.app.inject({ url: `/gen/jobs/${orphan.jobId}` })).json(), { status: 'failed', error: 'gen_interrupted' });
+});
+
+test('segment uses the free Space background removal without FAL_KEY and only downloads from the Space host', async t => {
+  let png!: Buffer; let host = SPACE_FILES;
+  const fake = fakeGradio({ '/preprocess_image': () => [{ url: `${host}pre.png` }] });
+  const f = await fixture(t, { MOCK_GEN: '0' }, spaceFetcher(() => png)); png = f.png;
+  f.context.media.providers.gradio = fake.gradio;
+  const seg = await f.form('/gen/segment', { image: png });
+  assert.equal(seg.statusCode, 200, seg.body); assert.match(String(seg.headers['content-type']), /image\/png/);
+  assert.equal((await sharp(seg.rawPayload).metadata()).format, 'png');
+  assert.deepEqual(fake.calls.map(c => c.endpoint), ['/preprocess_image']);
+  host = 'https://evil-space.hf.space/gradio_api/file=';
+  assert.equal((await f.form('/gen/segment', { image: png })).statusCode, 502);
+  const providers = new Providers(f.config);
+  for (const url of ['https://trellis-community-trellis.hf.space.evil.example/x.ply', 'https://replicate.delivery/x.ply', 'http://trellis-community-trellis.hf.space/x.ply']) {
+    await assert.rejects(providers.download(url, 1024, spaceHost(f.config.HF_TRELLIS_SPACE)), /asset host/);
+  }
 });

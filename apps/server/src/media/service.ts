@@ -11,6 +11,9 @@ import { defaults, type Species, type PetBundle } from './types.js';
 interface Job { id: string; user_id: string; species: Species; image_ids: string; status: string; asset_id: string | null; error: string | null; prediction_id: string | null; created_at: number }
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 const normalize = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+const jobCodes = ['gen_timeout', 'gen_low_quality', 'gen_quota', 'gen_interrupted'];
+const jobCode = (e: unknown) => e instanceof ApiError && jobCodes.includes(e.code) ? e.code : 'gen_failed';
+const isHf = (j: { prediction_id: string | null }) => !!j.prediction_id?.startsWith('hf:');
 export async function imagePng(bytes: Buffer) {
   try {
     const img = sharp(bytes, { limitInputPixels: 16_000_000, animated: false });
@@ -21,20 +24,24 @@ export async function imagePng(bytes: Buffer) {
 }
 export class MediaService {
   private inFlight = new Map<string, Promise<any>>();
+  /** Live HF Space runs by job id. A pending HF job missing here was orphaned by a restart. */
+  private hfJobs = new Map<string, Promise<void>>();
   constructor(readonly db: DB, readonly storage: AssetStore, readonly config: Config, readonly providers: Providers) {}
   private single<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const active = this.inFlight.get(key); if (active) return active;
     const p = fn().finally(() => this.inFlight.delete(key)); this.inFlight.set(key, p); return p;
   }
   async upload(userId: string, bytes: Buffer) { return { imageId: await this.storage.put(userId, await imagePng(bytes), 'image/png') }; }
-  private async imageData(userId: string, id: string) {
+  private async imageBytes(userId: string, id: string) {
     const asset = this.storage.get(id, userId);
     if (asset.mime !== 'image/png') throw new ApiError(422, 'invalid_image');
-    return `data:image/png;base64,${(await this.storage.read(id, userId)).toString('base64')}`;
+    return this.storage.read(id, userId);
   }
+  private async imageData(userId: string, id: string) { return `data:image/png;base64,${(await this.imageBytes(userId, id)).toString('base64')}`; }
   async segment(bytes: Buffer) {
     const png = await imagePng(bytes);
     if (this.config.MOCK_GEN) return png; // Explicit mock: no real subject isolation.
+    if (!this.config.FAL_KEY) return imagePng(await this.providers.hfSegment(png)); // Free: the TRELLIS Space's rembg + crop.
     const output = await this.providers.fal('fal-ai/imageutils/rembg', { image_url: `data:image/png;base64,${png.toString('base64')}` });
     if (typeof output.image?.url !== 'string') throw new ApiError(502, 'provider_failed');
     return imagePng(await this.providers.download(output.image.url, 16 * 1024 * 1024));
@@ -47,24 +54,49 @@ export class MediaService {
     return this.upload(userId, await this.providers.download(output.images[0].url, 16 * 1024 * 1024));
   }
   async startJob(userId: string, imageIds: string[], species: Species) {
-    const images = await Promise.all(imageIds.map(id => this.imageData(userId, id)));
+    const hf = !this.config.MOCK_GEN && this.config.IMAGE_TO_3D_PROVIDER === 'hf';
+    const images = await Promise.all(imageIds.map(id => this.imageBytes(userId, id)));
     if (this.config.MOCK_GEN && species !== 'dog' && species !== 'bird') throw new ApiError(422, 'gen_failed', 'Mock generation supports dog and bird');
     const id = randomUUID();
-    const predictionId = this.config.MOCK_GEN ? null : await this.providers.trellis(images);
+    const predictionId = this.config.MOCK_GEN ? null : hf ? `hf:${id}` : await this.providers.trellis(images.map(b => `data:image/png;base64,${b.toString('base64')}`));
     this.db.prepare('INSERT INTO gen_jobs (id,user_id,species,image_ids,status,prediction_id,created_at) VALUES (?,?,?,?,?,?,?)').run(id, userId, species, JSON.stringify(imageIds), 'pending', predictionId, Date.now());
+    if (hf) this.runHf(userId, id, images);
     return { jobId: id };
   }
-  async job(userId: string, id: string): Promise<{ status: string; splatUrl?: string; error?: string }> {
+  /** Background HF run. Results land only while the row is still pending (not timed out, deleted, or interrupted). */
+  private runHf(userId: string, id: string, images: Buffer[]) {
+    const run = (async () => {
+      let assetId: string;
+      try {
+        const ply = normalizePly(await this.providers.hfTrellis(images));
+        validatePly(ply);
+        assetId = await this.storage.put(userId, ply, 'application/octet-stream');
+      } catch (e) {
+        this.db.prepare('UPDATE gen_jobs SET status=?,error=? WHERE id=? AND status=?').run('failed', jobCode(e), id, 'pending');
+        return;
+      }
+      if (!this.db.prepare('UPDATE gen_jobs SET status=?,asset_id=? WHERE id=? AND status=?').run('done', assetId, id, 'pending').changes) await this.storage.remove(assetId);
+    })().catch(() => {}).finally(() => this.hfJobs.delete(id)); // e.g. the DB closed during shutdown; the next start reports gen_interrupted.
+    this.hfJobs.set(id, run);
+  }
+  private failed(error: string) {
+    const retryAfter = error === 'gen_quota' ? Math.ceil((this.providers.hfRetryAt - Date.now()) / 1000) : 0;
+    return { status: 'failed', error, ...(retryAfter > 0 ? { retryAfter } : {}) };
+  }
+  async job(userId: string, id: string): Promise<{ status: string; splatUrl?: string; error?: string; retryAfter?: number }> {
     return this.single(`job:${userId}:${id}`, async () => {
       const j = this.db.prepare('SELECT * FROM gen_jobs WHERE id=? AND user_id=?').get(id, userId) as unknown as Job | undefined;
       if (!j) throw new ApiError(404, 'job_not_found');
       if (j.status === 'done') return { status: 'done', splatUrl: this.storage.url(j.asset_id!) };
-      if (j.status === 'failed') return { status: 'failed', error: j.error! };
+      if (j.status === 'failed') return this.failed(j.error!);
       try {
+        // Retryable: an in-process HF run cannot survive a restart.
+        if (isHf(j) && !this.hfJobs.has(id)) throw new ApiError(503, 'gen_interrupted');
         if (Date.now() - j.created_at > this.config.GEN_TIMEOUT_MS) {
           if (j.prediction_id) await this.providers.cancelPrediction(j.prediction_id).catch(() => {});
           throw new ApiError(504, 'gen_timeout');
         }
+        if (isHf(j)) return { status: 'pending' };
         let ply: Buffer;
         if (!j.prediction_id) ply = await mockPly(this.config.bundleDir, j.species);
         else {
@@ -85,9 +117,9 @@ export class MediaService {
         if (e instanceof ApiError && e.code === 'job_not_found') throw e;
         // Transient polling/network failures leave the durable prediction available for the next poll.
         if (e instanceof ApiError && ['provider_timeout', 'provider_unavailable', 'rate_limited'].includes(e.code)) return { status: 'pending' };
-        const code = e instanceof ApiError && ['gen_timeout', 'gen_low_quality'].includes(e.code) ? e.code : 'gen_failed';
+        const code = jobCode(e);
         this.db.prepare('UPDATE gen_jobs SET status=?,error=? WHERE id=?').run('failed', code, id);
-        return { status: 'failed', error: code };
+        return this.failed(code);
       }
     });
   }

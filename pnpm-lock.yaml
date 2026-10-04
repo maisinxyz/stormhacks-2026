@@ -59,6 +59,9 @@ importers:
       '@fetch/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@gradio/client':
+        specifier: ^2.7.1
+        version: 2.7.1
       fastify:
         specifier: ^5.12.5
         version: 5.12.5
@@ -509,6 +512,10 @@ packages:
 
   '@fastify/rate-limit@10.3.0':
     resolution: {integrity: sha512-eIGkG9XKQs0nyynatApA3EVrojHOuq4l6fhB4eeCk4PIOeadvOJz9/4w3vGI44Go17uaXOWEcPkaD8kuKm7g6Q==}
+
+  '@gradio/client@2.7.1':
+    resolution: {integrity: sha512-NdxHhkWKE+p+6NLgDrGKMoyF1Ldcl+tRKDyy2x9HKExqHUj/LpsR0UY46x6lLAM+QHAspHa2E6cFjkJMCVb6gQ==}
+    engines: {node: '>=18.0.0'}
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -1269,6 +1276,9 @@ packages:
   fetch-blob@3.2.0:
     resolution: {integrity: sha512-7yAQpD2UMJzLi1Dqv7qFYnPbaPx7ZfFK6PiIxQ4PfkGPyNyl2Ugx+a/umUonmKqjhM4DnfbMvdX6otXq83soQQ==}
     engines: {node: ^12.20 || >= 14.13}
+
+  fetch-event-stream@0.1.6:
+    resolution: {integrity: sha512-GREtJ5HNikdU2AXtZ6E/5bk+aslMU6ie5mPG6H9nvsdDkkHQ6m5lHwmmmDTOBexok9hApQ7EprsXCdmz9ZC68w==}
 
   fflate@0.8.3:
     resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
@@ -2038,6 +2048,10 @@ snapshots:
       fastify-plugin: 5.1.0
       toad-cache: 3.7.4
 
+  '@gradio/client@2.7.1':
+    dependencies:
+      fetch-event-stream: 0.1.6
+
   '@img/colour@1.1.0': {}
 
   '@img/sharp-darwin-arm64@0.34.5':
@@ -2573,6 +2587,8 @@ snapshots:
     dependencies:
       node-domexception: 1.0.0
       web-streams-polyfill: 3.3.3
+
+  fetch-event-stream@0.1.6: {}
 
   fflate@0.8.3: {}
 

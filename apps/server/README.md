@@ -45,10 +45,10 @@ Protected routes require B1's session cookie, or explicit development stub auth.
 | Endpoint | Request | Response |
 |---|---|---|
 | `POST /uploads` | multipart `image` | `{imageId}` |
-| `POST /gen/segment` | multipart `image` | alpha-capable `image/png` |
+| `POST /gen/segment` | multipart `image` | alpha-capable `image/png`; free-tier quota: `429 {code:'gen_quota',message,retryAfter}` + `Retry-After` |
 | `POST /gen/reference` | `{imageId,species}` | `{imageId}` |
 | `POST /gen/image-to-3d` | `{imageIds:[id] or [front,side,back],species}` | `{jobId}` |
-| `GET /gen/jobs/:id` | poll about once/second | `{status:'pending'}` / `{status:'done',splatUrl}` / `{status:'failed',error}` |
+| `GET /gen/jobs/:id` | poll about once/second | `{status:'pending'}` / `{status:'done',splatUrl}` / `{status:'failed',error,retryAfter?}` (`retryAfter` seconds, with `gen_quota`) |
 | `POST /gen/prop` | `{prompt}` | `{imageUrl}` |
 | `POST /pets` | multipart files `splat,rig,weights,thumbnail`; string field `metadata` containing JSON | `201 PetBundle` |
 | `GET /pets` | — | `PetBundle[]` |
@@ -64,7 +64,7 @@ Protected routes require B1's session cookie, or explicit development stub auth.
 
 Species: `dog,cat,rodent,bird`. Metadata requires `name,species`; optional personality/stat values receive species defaults. Stats 0–100, personality 0–1. Voice IDs must have been designed for the current user or be configured species defaults. Save the design result with pet creation metadata or `PATCH /pets/:id`.
 
-Error JSON: `{code,message}`; validation includes field paths. Generation codes: `gen_timeout`, `gen_low_quality`, `gen_failed`. Missing provider config returns `503 service_unavailable`; mocks never silently activate. Every protected response includes `X-Fetch-Mock-Gen` and `X-Fetch-Mock-Voice` headers. `/health` exposes these flags for F2's demo indicator.
+Error JSON: `{code,message}`; validation includes field paths. Generation codes: `gen_timeout`, `gen_low_quality`, `gen_failed`, `gen_quota` (free HF GPU quota or queue full; retry later), `gen_interrupted` (server restarted during a free HF run; retry). Missing provider config returns `503 service_unavailable`; mocks never silently activate. Every protected response includes `X-Fetch-Mock-Gen` and `X-Fetch-Mock-Voice` headers. `/health` exposes these flags for F2's demo indicator.
 
 Uploads accept PNG/JPEG/WebP, normalize orientation and strip metadata, and reject oversized/animated/invalid images. The limit is 16 MB per file, 32 MB aggregate, 16 million input pixels. Bundle splats are 32 bytes each, <=300,000; weights are 8 bytes per splat with valid bone indices and sum 255; rig is JSON with 1–256 ordered bones. The endpoint supports F1's `.splat` format, including its current sprite fallback converted to Gaussians; it does not accept `.spz` or standalone layered-sprite files.
 
@@ -72,13 +72,22 @@ Asset URLs use expiring HMAC authorization and HTTPS when `PUBLIC_URL` is HTTPS.
 
 ## Providers and live verification
 
-3D: [Replicate firtoz/TRELLIS schema](https://replicate.com/firtoz/trellis/api/schema), pinned version in `.env.example`. Uses `save_gaussian_ply=true`, disables mesh/video generation, supports one or three input images. Predictions persist in SQLite and polls resume after server restarts. Poll requests retry up to three times; prediction creation is not automatically retried to avoid duplicate paid jobs. Timed-out predictions are canceled on the next poll. Generated outputs are copied to local private storage, with Gaussian-header validation before F1 receives them.
+3D (free, default): the public Hugging Face Space [`trellis-community/TRELLIS`](https://huggingface.co/spaces/trellis-community/TRELLIS) through `@gradio/client` on ZeroGPU: `/preprocess_image` (background removal + crop) per photo, `/generate_and_extract_glb`, then `/extract_gaussian`. Three photos use the Space's multi-image mode. `/gen/image-to-3d` returns `{jobId}` at once and the run continues in the server process; polls stay `pending` until the `.ply` (~260k Gaussians, ~17 MB, up axis -Y; F1 handles orientation) is validated and stored. Files are downloaded only from the configured Space's exact `*.hf.space` host. An in-process run cannot survive a restart, so a pending HF job polled after a restart fails with `gen_interrupted`. Anonymous use is roughly one generation per day (each run reserves 120 s of GPU); a quota error fails the job with `gen_quota` plus `retryAfter`, and later calls fail fast until then. Set `HF_TOKEN` to raise the quota. Without `FAL_KEY`, `/gen/segment` also uses the Space's `/preprocess_image`.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `IMAGE_TO_3D_PROVIDER` | `replicate` if `REPLICATE_API_TOKEN` is set, else `hf` | `hf` (free Space) or `replicate` (paid) |
+| `HF_TRELLIS_SPACE` | `trellis-community/TRELLIS` | Space id (`owner/name`); downloads are limited to its `owner-name.hf.space` host |
+| `HF_TOKEN` | empty (anonymous) | Optional `hf_...` token for more ZeroGPU quota; server-only |
+| `GEN_TIMEOUT_MS` | `300000` | Job deadline; the free queue can wait |
+
+3D (paid, optional): [Replicate firtoz/TRELLIS schema](https://replicate.com/firtoz/trellis/api/schema), pinned version in `.env.example`. Uses `save_gaussian_ply=true`, disables mesh/video generation, supports one or three input images. Predictions persist in SQLite and polls resume after server restarts. Poll requests retry up to three times; prediction creation is not automatically retried to avoid duplicate paid jobs. Timed-out predictions are canceled on the next poll. Generated outputs are copied to local private storage, with Gaussian-header validation before F1 receives them.
 
 Images: [fal rembg](https://fal.ai/models/fal-ai/imageutils/rembg/api), [FLUX dev image-to-image](https://fal.ai/models/fal-ai/flux/dev/image-to-image/api) for drawing references, and FLUX schnell followed by rembg for transparent props. fal calls use its durable queue. Provider URLs are restricted to known HTTPS media hosts; redirects are rejected.
 
 Voice: [ElevenLabs streaming TTS](https://elevenlabs.io/docs/api-reference/text-to-speech/stream), Voice Design followed by voice creation, Sound Effects, and single-use realtime Scribe tokens. Speech bytes stream directly to the client without full buffering. Keys stay on the server. If `imageId` is supplied without a description, a vision endpoint describes the pet; configure `VISION_*` or provide `description`. No separate vision key is required when using descriptions.
 
-Set `MOCK_GEN=0` with `REPLICATE_API_TOKEN` and `FAL_KEY` to enable real generation. Set `MOCK_VOICE=0` with `ELEVENLABS_API_KEY` and default species voice IDs (or design a voice). These live services have NOT been exercised without credentials. Real dog/bird photo generation, visual quality, <2 minute generation, and <1 second first audio need measurement against the selected accounts before the demo.
+Set `MOCK_GEN=0` to enable real generation: photo-to-3D and segmentation work free through the HF Space with no keys; `FAL_KEY` adds drawing references and props (and switches segmentation to fal); `REPLICATE_API_TOKEN` switches 3D to Replicate. Set `MOCK_VOICE=0` with `ELEVENLABS_API_KEY` and default species voice IDs (or design a voice). These live services have NOT been exercised without credentials. Real dog/bird photo generation, visual quality, <2 minute generation, and <1 second first audio need measurement against the selected accounts before the demo.
 
 Mock generation converts F1's existing dog/bird `.splat` assets to Gaussian PLY. It returns the input for reference/segmentation; it does not pretend to infer 3D from a photo. Props use one transparent document placeholder. Mock voice/SFX return a short fixed WAV chime, not actual speech. Cat/rodent mock generation returns a clear failure. These limitations are visible through flags.
 

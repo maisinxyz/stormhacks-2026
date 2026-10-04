@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import type { ServerContext } from '../app.js';
 import { imagePng } from './service.js';
+import { QuotaError } from './providers.js';
 import { petMetadataSchema, petPatchSchema, personalitySchema, speciesSchema } from './types.js';
 
 async function multipart(request: FastifyRequest, allowed: string[]) {
@@ -87,7 +88,14 @@ export async function registerMediaRoutes(app: FastifyInstance, ctx: ServerConte
       const { files } = await multipart(req, ['image']); return media.upload(user(req), required(files, 'image'));
     });
     scoped.post('/gen/segment', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
-      const { files } = await multipart(req, ['image']); return reply.type('image/png').send(await media.segment(required(files, 'image')));
+      const { files } = await multipart(req, ['image']);
+      let png: Buffer;
+      try { png = await media.segment(required(files, 'image')); } catch (e) {
+        // The shared error handler only sends {code,message}; free-tier quota also tells the UI when to retry.
+        if (!(e instanceof QuotaError) || !e.retryAfter) throw e;
+        return reply.code(429).header('Retry-After', e.retryAfter).send({ code: e.code, message: e.message, retryAfter: e.retryAfter });
+      }
+      return reply.type('image/png').send(png);
     });
     scoped.post('/gen/reference', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
       const b = z.object({ imageId: imageIdSchema, species: speciesSchema }).strict().parse(req.body); return media.reference(user(req), b.imageId, b.species);
