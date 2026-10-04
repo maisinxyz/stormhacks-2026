@@ -41,6 +41,7 @@ function App() {
   const [showRunLog, setShowRunLog] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [playLoading, setPlayLoading] = useState(false)
   const [windowRects, setWindowRects] = useState(initialWindowRects)
   const [windowOrder, setWindowOrder] = useState(['inbox', 'files', 'calendar'])
   const api = useMemo(() => new FetchApiClient(), [])
@@ -50,10 +51,12 @@ function App() {
   const recognition = useRef<ReturnType<typeof getSpeechRecognition>>(null)
 
   const openPlay = () => {
+    if (playLoading) return
+    setPlayLoading(true)
     const petId = encodeURIComponent(pet?.id ?? 'dog')
     const configuredOrigin = (import.meta.env.VITE_PLAY_APP_URL as string | undefined)?.replace(/\/$/, '')
     const origin = configuredOrigin || (import.meta.env.DEV ? 'http://localhost:5174' : '')
-    location.href = `${origin}/camera.html?pet=${petId}`
+    window.setTimeout(() => { location.href = `${origin}/camera.html?pet=${petId}` }, 1250)
   }
 
   const setListening = (value: boolean) => setVoice({ listening: value })
@@ -195,6 +198,7 @@ function App() {
     {showRunLog && <RunLogPanel runs={appState.runs} onClose={() => setShowRunLog(false)} onCancel={async (runId) => { await api.cancel(runId); updateRun(runId, { status: 'cancelled' }); setToast('Errand cancelled') }} />}
     {showNotifications && <NotificationsPanel notifications={appState.notifications} onClose={() => setShowNotifications(false)} />}
     {showSettings && <SettingsPanel settings={appState.settings} onChange={updateSettings} onClose={() => setShowSettings(false)} />}
+    {playLoading && <div className="play-loading" role="status" aria-live="polite"><div className="play-loading-card"><div className="loader-dog" aria-hidden="true">🐕</div><p className="loader-kicker">Pip is getting ready</p><h2>Opening play room</h2><div className="loader-track"><span className="loader-progress" /><span className="loader-walker" aria-hidden="true">🐕</span></div><small>Setting out the toys and making space to roam</small></div></div>}
   </div>
 }
 
