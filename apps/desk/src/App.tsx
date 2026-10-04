@@ -60,7 +60,7 @@ function App() {
     const petId = encodeURIComponent(pet?.id ?? '')
     const configuredOrigin = (import.meta.env.VITE_PLAY_APP_URL as string | undefined)?.replace(/\/$/, '')
     const origin = configuredOrigin || (import.meta.env.DEV ? 'http://localhost:5174' : '')
-    window.setTimeout(() => { location.href = `${origin}/camera.html?pet=${petId}` }, 1250)
+    window.setTimeout(() => { location.href = `${origin}/camera.html?pet=${petId}&name=${encodeURIComponent(pet?.name ?? '')}` }, 1250)
   }
 
   const setListening = (value: boolean) => setVoice({ listening: value })
