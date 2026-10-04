@@ -490,6 +490,8 @@ The existing `Interactions` window listeners keep working; Person B only needs t
 
 Since 6d9bf54 the dog's body is also clamped to the visible frame every frame, so it cannot be left off-screen: turning away slides it along the edge instead of leaving it anchored in the room. Recenter brings it to the middle.
 
+An **info button** ("i", top right under the flip control) opens a panel listing every command, with a note that exact words are not needed; "Got it" closes it. The list is generated from the same table the matcher uses, so it cannot drift from what the dog understands.
+
 The "woof" is a synthesized bark (`play/sfx.ts`, no audio files), a head jerk and a "Woof!" bubble; it plays only after the microphone has closed. Limits: English, word-level matching (no paraphrase understanding such as "make yourself comfy"); directions are screen directions, not real-world surfaces.
 
 ### B.8 Integration effects (making it feel in the world)

@@ -1,4 +1,5 @@
 // Camera view chrome (play.md B.2/B.7/B.10): edge controls only, the middle of the screen stays free.
+import { COMMANDS } from '../commands';
 
 export interface CameraUiHandlers {
   back(): void; flip(): void; recenter(): void;
@@ -18,6 +19,7 @@ export class CameraUi {
   private chips = document.createElement('div');
   private mic: HTMLButtonElement;
   private voiceEl = document.createElement('div');
+  private helpEl = document.createElement('div');
   private arChip: HTMLButtonElement;
   private toastTimer = 0;
   private flash = document.createElement('div');
@@ -37,6 +39,17 @@ export class CameraUi {
     };
     btn(this.el, 'cam-btn tl', 'Back', '‹', h.back);
     btn(this.el, 'cam-btn tr', 'Switch camera', '⇄', h.flip);
+    // info button: what can I say?
+    btn(this.el, 'cam-btn ti', 'What can I say to my dog?', 'i', () => this.help(this.helpEl.hidden));
+    this.helpEl.className = 'cam-help'; this.helpEl.dataset.ui = '1'; this.helpEl.hidden = true;
+    this.helpEl.setAttribute('role', 'dialog'); this.helpEl.setAttribute('aria-label', 'Voice commands');
+    this.helpEl.innerHTML = '<h2>Say it to your dog</h2><p class="hint">Tap the mic, then speak. It picks the closest command, so you do not need the exact words. Anything else gets a wag and hearts.</p>'
+      + '<ul>' + COMMANDS.filter(c => c.id !== 'stand').map(c => `<li>${c.label}</li>`).join('') + '</ul>'
+      + '<p class="hint">After Sit or Lie down the dog stays there until you say "stand up" or give another command.</p>';
+    const close = document.createElement('button');
+    close.type = 'button'; close.className = 'primary'; close.textContent = 'Got it'; close.addEventListener('click', () => this.help(false));
+    this.helpEl.appendChild(close);
+    this.el.appendChild(this.helpEl);
 
     // mic: tap to start, tap again to stop (it also stops by itself). Space/Enter work because it is a button.
     this.mic = btn(this.el, 'cam-btn bl', 'Talk to your dog: tap to start, tap again to stop', '🎤', h.mic);
@@ -91,6 +104,9 @@ export class CameraUi {
     this.voiceEl.textContent = state === 'listening' ? 'Listening' : 'Interpreting';
     if (state === 'idle') this.mic.style.removeProperty('--lvl');
   }
+  /** Show or hide the list of voice commands. */
+  help(open: boolean) { this.helpEl.hidden = !open; }
+
   /** A short speech bubble at a screen point (the dog's "Woof!"). */
   bubble(text: string, x: number, y: number) {
     const b = document.createElement('div');

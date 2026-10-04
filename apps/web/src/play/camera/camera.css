@@ -6,6 +6,7 @@
   background: rgba(0,0,0,.38); color: #fff; font-size: 22px; line-height: 1; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
 .cam-btn:focus-visible, .cam-card button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 .cam-btn.tl { top: calc(12px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); }
+.cam-btn.ti { top: calc(66px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); font: italic 700 20px Georgia, serif; }
 .cam-btn.tr { top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); }
 .cam-btn.br { bottom: calc(18px + env(safe-area-inset-bottom)); right: calc(14px + env(safe-area-inset-right)); }
 .cam-btn.bl { bottom: calc(18px + env(safe-area-inset-bottom)); left: calc(14px + env(safe-area-inset-left)); }
@@ -62,3 +63,13 @@
   pointer-events: none; box-shadow: 0 2px 10px rgba(0,0,0,.25); animation: cam-bubble .95s ease-out forwards; }
 @keyframes cam-bubble { 0% { opacity: 0; margin-top: 8px; } 15% { opacity: 1; margin-top: 0; } 75% { opacity: 1; } 100% { opacity: 0; margin-top: -14px; } }
 @media (prefers-reduced-motion: reduce) { .cam-bubble { animation: none; } }
+
+/* the voice-command list behind the info button */
+.cam-help { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(88%, 360px); max-height: 80%; overflow: auto; padding: 18px 20px 16px; border-radius: 18px;
+  background: rgba(15,15,20,.88); color: #fff; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); pointer-events: auto; text-align: center; box-shadow: 0 8px 30px rgba(0,0,0,.4); }
+.cam-help[hidden] { display: none; }
+.cam-help h2 { margin: 0 0 6px; font-size: 18px; }
+.cam-help .hint { margin: 6px 0 10px; font-size: 13px; opacity: .8; line-height: 1.35; }
+.cam-help ul { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; }
+.cam-help li { padding: 6px 12px; border-radius: 16px; background: rgba(255,255,255,.14); font-size: 14px; }
+.cam-help button { margin-top: 4px; padding: 10px 22px; border-radius: 22px; border: 0; background: #fff; color: #111; font: inherit; font-weight: 600; }
