@@ -50,7 +50,7 @@ export class DeskEngine implements PetEngine {
     await this.mock.loadPet(bundle)
     const real = this.real
     const key = `${bundle.id}|${bundle.splatUrl}`
-    if (!real || !bundle.splatUrl || key === this.loadedKey) return
+    if (!real || (!bundle.splatUrl && !bundle.plush) || key === this.loadedKey) return // a plush pet has traits instead of a splat file
     this.loadedKey = key
     // serialize loads so a slow earlier bundle can't replace a newer one
     this.loads = this.loads.then(async () => {

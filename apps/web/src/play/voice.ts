@@ -1,42 +1,11 @@
-// Push-to-talk voice for the Play shell (play.md B.7 / A.7). Web Speech API + the local-intent table from PRD.md 2.4.
+// Voice input for the Play shell (play.md B.7 / A.7): records a turn and returns what was said. commands.ts decides what it means.
 // ponytail: browser speech recognition only (Chrome, Safari); swap in the F2 ElevenLabs Scribe path when the Play shell
 // shares a build with apps/desk.
-import type { LocalIntent } from '@fetch/contracts';
+import { interpret, interpretBest, SURE } from './commands';
 import { loadWhisper, rms, toPcm, transcribe } from './whisper';
 
-export type VoiceCommand = { kind: 'intent'; intent: LocalIntent } | { kind: 'praise' } | { kind: 'feed' } | { kind: 'follow' } | { kind: 'swap' };
-
-// Whisper (and every recognizer) mishears single short words, so each command lists the words it commonly turns into
-// ("sit" -> "sieve", "set", "sat"). The mic only listens for commands, so the looser match is safe.
-const TABLE: [RegExp, VoiceCommand][] = [
-  [/\b(roll(ing)? over|role over|rollover)\b/, { kind: 'intent', intent: 'roll_over' }],
-  [/\bplay(ing)? (dead|dad)\b/, { kind: 'intent', intent: 'play_dead' }],
-  [/\b(fetch(es|ed)?|get the ball|ball)\b/, { kind: 'intent', intent: 'fetch_ball' }],
-  [/\bgood (boy|girl|pet|dog|bird|puppy)\b/, { kind: 'praise' }],
-  [/\b(treat|feed|dinner|food)\b/, { kind: 'feed' }],
-  [/\b(other side|switch sides?|swap( sides?)?|move over)\b/, { kind: 'swap' }], // camera view: stand on the other side of the shot
-  [/\bfollow\b/, { kind: 'follow' }], // camera view: keep in front of the user as they turn
-  [/\b(wake( up)?|woke up|week up)\b/, { kind: 'intent', intent: 'wake' }],
-  [/\b(sleep|asleep|nap|bed ?time)\b/, { kind: 'intent', intent: 'sleep' }],
-  [/\b(sit(s|ting)?|sat|set|seat|sieve|sip|sin|sid)\b/, { kind: 'intent', intent: 'sit' }],
-  [/\b(stay|stray|stage|state)\b/, { kind: 'intent', intent: 'stay' }],
-  [/\b(come|calm|coming|c'?mon|common|here)\b/, { kind: 'intent', intent: 'come' }],
-  [/\b(speak|bark(s)?|park)\b/, { kind: 'intent', intent: 'speak' }],
-  [/\b(spin|span|spend|spent)\b/, { kind: 'intent', intent: 'spin' }],
-  [/\b(shake|paw)\b/, { kind: 'intent', intent: 'shake' }],
-  [/\b(dance|dense|stance)\b/, { kind: 'intent', intent: 'dance' }],
-  [/\bhide\b/, { kind: 'intent', intent: 'hide' }],
-  [/\btrick\b/, { kind: 'intent', intent: 'trick' }],
-  [/\b(stop|stand|get up|up)\b/, { kind: 'intent', intent: 'stop' }], // 'stop' is the stand-in-place intent
-];
-
-export function parseCommand(text: string): VoiceCommand | null {
-  const t = text.toLowerCase();
-  return TABLE.find(([re]) => re.test(t))?.[1] ?? null;
-}
-
 interface Recognition {
-  lang: string; interimResults: boolean; continuous: boolean;
+  lang: string; interimResults: boolean; continuous: boolean; maxAlternatives: number;
   onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
   onerror: ((e: { error: string }) => void) | null;
   onend: (() => void) | null;
@@ -79,8 +48,15 @@ export class PushToTalk {
     this.supported = !!Ctor || (typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia);
     if (!Ctor) return;
     const r = (this.rec = new Ctor());
-    r.lang = 'en-US'; r.interimResults = false; r.continuous = false;
-    r.onresult = e => { this.heard = Array.from(e.results).map(x => x[0].transcript).join(' '); };
+    r.lang = 'en-US'; r.continuous = false;
+    r.interimResults = true;  // partial results too: a clear command is acted on while the user is still finishing the sentence
+    r.maxAlternatives = 5;    // the recognizer's other guesses ("sit", "set", "sieve"): the matcher picks the one that is a command
+    r.onresult = e => {
+      // for each stretch of speech take the alternative that is the clearest command, then join the stretches
+      const parts = Array.from(e.results).map(res => interpretBest(Array.from(res as ArrayLike<{ transcript: string }>, a => a.transcript)).text);
+      this.heard = parts.join(' ');
+      if (this.state === 'listening' && this.heard) this.offer(this.heard, this.turn, false, true);
+    };
     r.onerror = e => { if (e.error !== 'aborted' && e.error !== 'no-speech') this.browserFailed = e.error; };
     r.onend = () => { this.browserText = this.heard; this.heard = ''; if (this.browserText) this.offer(this.browserText, this.turn, false); };
   }
@@ -172,9 +148,21 @@ export class PushToTalk {
   }
 
   /** Deliver a transcript once per turn: a recognised command at once, anything else only from Whisper. */
-  private offer(text: string, turn: number, fromWhisper: boolean) {
+  private offer(text: string, turn: number, fromWhisper: boolean, early = false) {
     if (turn !== this.turn || this.done) return;
-    if (parseCommand(text) || fromWhisper) { this.done = true; this.set('idle'); this.onText(text); }
+    // a clear command from the fast recognizer needs no second opinion
+    if ((interpret(text)?.score ?? 0) >= SURE || fromWhisper) {
+      this.done = true;
+      if (early) this.cut(); // heard it while the user was still speaking: stop listening now
+      this.set('idle'); this.onText(text);
+    }
+  }
+
+  /** Stop listening without interpreting (the command was already understood). */
+  private cut() {
+    this.stopWatching();
+    try { this.rec?.abort(); } catch { /* not running */ }
+    if (this.recorder?.state === 'recording') this.recorder.stop();
   }
 
   /** Whisper had nothing: fall back to what the browser heard, or say that nothing came through. */

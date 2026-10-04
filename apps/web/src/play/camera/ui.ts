@@ -1,12 +1,8 @@
 // Camera view chrome (play.md B.2/B.7/B.10): edge controls only, the middle of the screen stays free.
-import type { LocalIntent } from '@fetch/contracts';
+import { COMMANDS } from '../commands';
 
 export interface CameraUiHandlers {
-  back(): void; flip(): void; recenter(): void; treat(): void; ball(): void;
-  /** A command chip: the same intents voice produces, for when speech recognition is unavailable. */
-  command(intent: LocalIntent): void;
-  follow(): void;
-  swap(): void;
+  back(): void; flip(): void; recenter(): void;
   /** A dog photo was chosen: make the plush pet from it. */
   photo(file: File): void;
   /** Mic button: toggles listening. */
@@ -23,6 +19,7 @@ export class CameraUi {
   private chips = document.createElement('div');
   private mic: HTMLButtonElement;
   private voiceEl = document.createElement('div');
+  private helpEl = document.createElement('div');
   private arChip: HTMLButtonElement;
   private toastTimer = 0;
   private flash = document.createElement('div');
@@ -42,6 +39,17 @@ export class CameraUi {
     };
     btn(this.el, 'cam-btn tl', 'Back', '‹', h.back);
     btn(this.el, 'cam-btn tr', 'Switch camera', '⇄', h.flip);
+    // info button: what can I say?
+    btn(this.el, 'cam-btn ti', 'What can I say to my dog?', 'i', () => this.help(this.helpEl.hidden));
+    this.helpEl.className = 'cam-help'; this.helpEl.dataset.ui = '1'; this.helpEl.hidden = true;
+    this.helpEl.setAttribute('role', 'dialog'); this.helpEl.setAttribute('aria-label', 'Voice commands');
+    this.helpEl.innerHTML = '<h2>Say it to your dog</h2><p class="hint">Tap the mic, then speak. It picks the closest command, so you do not need the exact words. Anything else gets a wag and hearts.</p>'
+      + '<ul>' + COMMANDS.filter(c => c.id !== 'stand').map(c => `<li>${c.label}</li>`).join('') + '</ul>'
+      + '<p class="hint">After Sit or Lie down the dog stays there until you say "stand up" or give another command.</p>';
+    const close = document.createElement('button');
+    close.type = 'button'; close.className = 'primary'; close.textContent = 'Got it'; close.addEventListener('click', () => this.help(false));
+    this.helpEl.appendChild(close);
+    this.el.appendChild(this.helpEl);
 
     // mic: tap to start, tap again to stop (it also stops by itself). Space/Enter work because it is a button.
     this.mic = btn(this.el, 'cam-btn bl', 'Talk to your dog: tap to start, tap again to stop', '🎤', h.mic);
@@ -56,13 +64,12 @@ export class CameraUi {
     });
     more.setAttribute('aria-expanded', 'false');
     this.chips.className = 'cam-chips'; this.chips.dataset.ui = '1'; this.chips.hidden = true;
-    for (const [label, intent] of [['Sit', 'sit'], ['Stand', 'stop'], ['Stay', 'stay'], ['Come', 'come'], ['Spin', 'spin'], ['Roll over', 'roll_over']] as [string, LocalIntent][])
-      btn(this.chips, 'cam-chip', label, label, () => h.command(intent));
-    btn(this.chips, 'cam-chip', 'Follow me as I turn', 'Follow', h.follow);
-    btn(this.chips, 'cam-chip', 'Stand on the other side of the shot', 'Swap side', h.swap);
-    btn(this.chips, 'cam-chip', 'Take a photo and save it', 'Take a photo', h.capture);
-    btn(this.chips, 'cam-chip', 'Give a treat', 'Treat', h.treat);
-    btn(this.chips, 'cam-chip', 'Throw the ball', 'Ball', h.ball);
+    // upload a dog photo -> plush pet (a hidden file input behind a chip; `capture` is left off so the gallery is offered too)
+    const file = document.createElement('input');
+    file.type = 'file'; file.accept = 'image/*'; file.hidden = true;
+    file.addEventListener('change', () => { const f = file.files?.[0]; file.value = ''; if (f) h.photo(f); });
+    this.chips.appendChild(file);
+    btn(this.chips, 'cam-chip', 'Make the pet from a photo of your dog', 'My dog photo', () => file.click());
     btn(this.chips, 'cam-chip', 'Recenter the dog in front of you', 'Recenter', h.recenter);
     this.arChip = btn(this.chips, 'cam-chip', 'Toggle true AR', 'True AR', h.ar);
     this.arChip.hidden = true;
@@ -73,7 +80,7 @@ export class CameraUi {
     this.thumb.className = 'cam-thumb'; this.thumb.alt = 'Last photo'; this.thumb.hidden = true;
     this.coachEl.className = 'cam-coach'; this.coachEl.hidden = true;
     this.coachEl.innerHTML = '<p>Move your phone. Your dog is here.</p><p class="tip">Tap the floor to place it <span aria-hidden="true">↓</span></p>'
-      + '<p class="tip">It stands to the side so you stay in the shot. Swap sides under ⋯.</p>'
+      + '<p class="tip">Tap the mic and say sit, come here, dance, roll over...</p>'
       + '<p class="tip">It stays put when you turn. It cannot hide behind things or follow you walking.</p>'; // honest limits of the gyro tier (B.14)
     const grain = document.createElement('div'); // light film grain over feed + dog so the dog is not cleaner than the camera (B.8)
     grain.className = 'cam-grain';
@@ -96,6 +103,17 @@ export class CameraUi {
     this.voiceEl.dataset.state = state;
     this.voiceEl.textContent = state === 'listening' ? 'Listening' : 'Interpreting';
     if (state === 'idle') this.mic.style.removeProperty('--lvl');
+  }
+  /** Show or hide the list of voice commands. */
+  help(open: boolean) { this.helpEl.hidden = !open; }
+
+  /** A short speech bubble at a screen point (the dog's "Woof!"). */
+  bubble(text: string, x: number, y: number) {
+    const b = document.createElement('div');
+    b.className = 'cam-bubble'; b.textContent = text;
+    b.style.left = `${x}px`; b.style.top = `${y}px`;
+    this.el.appendChild(b);
+    window.setTimeout(() => b.remove(), 950);
   }
   /** 0..1 loudness: makes the mic button swell with the voice. */
   micLevel(v: number) { this.mic.style.setProperty('--lvl', v.toFixed(2)); }

@@ -11,6 +11,7 @@ import type { PetBundle, Species } from '@fetch/contracts';
 import { cleanupSplat, MAIN_BUDGET } from './cleanup';
 import { encodeSplat, parsePly, type Gaussians } from './gaussians';
 import { fitRig, skinWeights } from './rig';
+import { knownBundle, knownDog } from '../sdf/known';
 import { spriteToGaussians } from './spriteFallback';
 
 /** `detail` is set on the 'fallback' stage: the GenError code that forced the flat sprite rig. */
@@ -49,6 +50,11 @@ export async function generatePet(api: string, input: GenInput, onProgress: Prog
   const p = (stage: string, pct: number, detail?: string) => onProgress(detail ? { stage, pct, detail } : { stage, pct });
   const post = (path: string, body: BodyInit, headers?: HeadersInit) => fetch(api + path, { method: 'POST', body, headers, credentials: 'include' });
   const postJson = (path: string, body: unknown) => post(path, JSON.stringify(body), { 'content-type': 'application/json' });
+
+  // A photo we already modelled by hand: return that dog at once, no server or GPU quota.
+  // ponytail: the bundle lives in this browser session only (not POSTed to /pets); save it server-side if it must survive a reload.
+  const known = await knownDog(input.image);
+  if (known) { p('save', 1); return knownBundle(known, input.name || known.name); }
 
   p('upload', 0.02);
   const uploaded = (await json<{ imageId: string }>(await post('/uploads', form({ image: input.image })))).imageId;
