@@ -3,8 +3,8 @@
 import * as THREE from 'three';
 import { interpret, type CommandId } from '../commands';
 import { bark } from '../sfx';
+import { commandSteps } from '../tricks';
 import { PushToTalk } from '../voice';
-import type { PerformStep } from '../../engine/behavior';
 import type { OrientationStatus } from './pose';
 import type { LocalIntent } from '@fetch/contracts';
 import type { PlayContext, PlayView, PlayViewId } from '../types';
@@ -318,49 +318,13 @@ export class CameraView implements PlayView {
     this.ui.bubble('Woof!', (n.x + 1) / 2 * innerWidth, (1 - n.y) / 2 * innerHeight);
   }
 
-  private lastSurprise = -1;
-  /** The 19 commands (+ "stand up"). A new command replaces the running one at once. Directions are the user's: left/right
-   *  across the screen, "up" away from the user, "down" toward them. */
+  /** The 19 commands (+ "stand up"). A new command replaces the running one at once (the steps live in ../tricks). */
   private run(id: CommandId) {
-    const e = this.ctx.engine, cam = e.camera, p = e.petPosition;
+    const e = this.ctx.engine;
     this.following = false;
     this.alive.focus(3);
-    const f = cam.getWorldDirection(new THREE.Vector3()); f.y = 0;
-    if (f.lengthSq() < 1e-4) f.set(0, 0, -1);
-    f.normalize();
-    const right = new THREE.Vector3(-f.z, 0, f.x), foot = new THREE.Vector3(cam.position.x, 0, cam.position.z);
-    /** A floor point `a` metres to the user's right and `b` metres away from them, kept within reach of the camera. */
-    const by = (a: number, b: number) => { const d = new THREE.Vector3(p.x, 0, p.z).addScaledVector(right, a).addScaledVector(f, b).sub(foot); return foot.clone().add(d.setLength(THREE.MathUtils.clamp(d.length(), PLACE_MIN, PLACE_MAX))); };
-    /** The point `dist` metres from the user, on the line to the dog. */
-    const near = (dist: number) => { const d = new THREE.Vector3(p.x - foot.x, 0, p.z - foot.z); if (d.lengthSq() < 1e-4) d.copy(f); return foot.clone().add(d.setLength(dist)); };
-    const face: PerformStep = { call: () => e.faceToward(cam.position.x, cam.position.z) };
-    const woof: PerformStep[] = [{ call: () => this.woof() }, { clip: 'perk', secs: 0.55 }];
-    const hearts: PerformStep = { call: () => e.flourish('heart') }, sparkle: PerformStep = { call: () => e.flourish('sparkle') };
-    const wag = (secs = 1.3, speed = 1): PerformStep => ({ clip: 'wag', secs, speed });
-    const go = (a: number, b: number): PerformStep[] => [{ to: by(a, b) }, face, { clip: 'stand', secs: 1 }];
-    const tricks: PerformStep[][] = [
-      [{ clip: 'beg', secs: 2.4 }], [{ clip: 'playBow', secs: 1.4 }, { clip: 'jump' }], [{ clip: 'spin' }, { clip: 'spin' }],
-      [{ clip: 'roll' }, { clip: 'jump' }], [{ clip: 'hide', secs: 1.6 }, { clip: 'startle' }], [{ clip: 'scratch', secs: 2 }], [{ clip: 'count', secs: 2 }],
-    ];
-    const seq: Record<Exclude<CommandId, 'follow'>, () => PerformStep[]> = {
-      sit: () => [face, { clip: 'sit', hold: true }],
-      come: () => [{ to: near(1.2), fast: true }, face, ...woof, wag(1.5)],
-      lie: () => [face, { clip: 'lie', hold: true }],
-      jump: () => [face, { clip: 'jump' }, ...woof, wag(1)],
-      left: () => go(-0.9, 0), right: () => go(0.9, 0), up: () => go(0, 0.9), down: () => go(0, -0.9),
-      turn: () => [{ clip: 'spin' }, face, { clip: 'stand', secs: 0.6 }],
-      love: () => [{ to: near(1), fast: true }, face, hearts, { clip: 'tilt', secs: 1.6 }, hearts, wag(1.5)],
-      good: () => [face, hearts, { clip: 'jump' }, wag(1.6, 1.8)],
-      paw: () => [face, { clip: 'shake', secs: 2.6 }],
-      hi: () => [face, { clip: 'shake', secs: 1.6, speed: 1.4 }, ...woof],
-      look: () => [face, { clip: 'perk', secs: 3 }],
-      dance: () => [sparkle, { clip: 'dance', secs: 2.4 }, { clip: 'spin' }, face, ...woof],
-      dead: () => [face, { clip: 'playDead', secs: 3.2 }, { clip: 'startle' }, wag(1)],
-      roll: () => [{ clip: 'roll' }, { clip: 'stand', secs: 0.5 }],
-      surprise: () => { let i = this.lastSurprise; while (i === this.lastSurprise) i = Math.floor(Math.random() * tricks.length); this.lastSurprise = i; return [sparkle, face, ...tricks[i]]; },
-      stand: () => [{ clip: 'stand', secs: 0.3 }],
-    };
-    if (id === 'follow') this.follow(); else e.perform(seq[id]());
+    if (id === 'follow') this.follow();
+    else e.perform(commandSteps(id, { engine: e, eye: e.camera.position, forward: e.camera.getWorldDirection(new THREE.Vector3()), reach: [PLACE_MIN, PLACE_MAX], hold: true, woof: () => this.woof() }));
   }
 
   // ---------- WebXR tier (B.5) ----------
