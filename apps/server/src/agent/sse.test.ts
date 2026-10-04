@@ -39,7 +39,7 @@ describe('SSE /agent/runs/:id/events', () => {
     a = await buildB1App({ brain: mockBrain(40), config: { mockConnectors: true, demoUserId: 'sse-user' } });
     const base = await a.app.listen({ port: 0, host: '127.0.0.1' });
     const { runId } = await (await fetch(`${base}/agent/run`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ petId: 'bird', text: 'find my budget sheet' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ petId: 'dog', text: 'find my budget sheet' }),
     })).json() as { runId: string };
 
     const first = await readFrames(`${base}/agent/runs/${runId}/events`, {}, 3);

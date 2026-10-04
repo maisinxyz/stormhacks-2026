@@ -19,7 +19,7 @@ const STANDUP_NOTES = `Standup notes - today
 Alex: finished the splat loader; next is skinning perf.
 Priya: approval card + bone button done; starting the run log dock.
 Sam: agent SSE replay landed; next is Calendar tool.
-Jordan: demo script v2 drafted; need a voice line for the bird.
+Jordan: demo script v2 drafted; need a voice line for the dog.
 Blockers: none. Demo rehearsal at 4pm.`;
 
 export function seedEmails(): Email[] {

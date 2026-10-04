@@ -7,6 +7,7 @@ import type { PetBundle } from '../contracts'
 import type { DeskEngine, GenerateProgress } from '../engine/deskEngine'
 import type { ServerStatus } from '../pets/usePetSync'
 import { CameraCapture } from './CameraCapture'
+import { KNOWN_DOGS, knownDog, type KnownDog } from '@fetch/web/src/engine/sdf/known'
 import './create.css'
 import { errorCopy, fallbackReason, stageCopy, stageLabel, stagePlan, type StageId } from './genCopy'
 
@@ -59,6 +60,7 @@ export function CreatePetFlow({ engine, serverStatus, onCreated, onFinished, onC
   const [source, setSource] = useState<Source>('upload')
   const [images, setImages] = useState<Partial<Record<Source, Blob | null>>>({})
   const [name, setName] = useState('')
+  const [matched, setMatched] = useState<KnownDog | null>(null)
   const [progress, setProgress] = useState<GenerateProgress>({ stage: 'upload', pct: 0 })
   const [seen, setSeen] = useState<string[]>([])
   const [failure, setFailure] = useState<{ code: string; retryAfter?: number } | null>(null)
@@ -73,17 +75,51 @@ export function CreatePetFlow({ engine, serverStatus, onCreated, onFinished, onC
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
   useEffect(() => { if (step !== 'generating') return; const t = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(t) }, [step])
 
+  const handleImagePicked = async (blob: Blob) => {
+    setImages(prev => ({ ...prev, [source]: blob }))
+    try {
+      const known = await knownDog(blob)
+      if (known) {
+        setMatched(known)
+        setSpecies(known.species)
+        if (!name || name === 'Biscuit' || name === 'Miso') setName(known.name)
+      } else {
+        setMatched(null)
+      }
+    } catch (e) {
+      console.warn('could not test known dog:', e)
+      setMatched(null)
+    }
+  }
+
+  const loadKnownSample = async (k: KnownDog) => {
+    try {
+      const res = await fetch(k.photo)
+      const blob = await res.blob()
+      await handleImagePicked(blob)
+      setSpecies(k.species)
+      setName(k.name)
+      setMatched(k)
+    } catch {
+      const blob = await createSamplePhoto(k.species)
+      await handleImagePicked(blob)
+      setSpecies(k.species)
+      setName(k.name)
+    }
+  }
+
   const run = async (replaces?: string) => {
     if (!image || running.current) return
     running.current = true
     setStep('generating'); setFailure(null); setSeen([]); setProgress({ stage: 'upload', pct: 0 }); setStartedAt(Date.now()); setNow(Date.now())
     let fellBack: string | undefined
     try {
-      const pet = await engine.generatePet({ kind: 'photo', image, species, name: petName }, (p) => {
+      const generated = await engine.generatePet({ kind: 'photo', image, species, name: petName }, (p) => {
         if (p.stage === 'fallback') fellBack = p.detail ?? 'gen_failed'
         setProgress(p)
         setSeen((list) => (list.includes(p.stage) ? list : [...list, p.stage]))
       })
+      const pet = generated as PetBundle
       await onCreated(pet, replaces)
       if (fellBack) { setFlat({ pet, code: fellBack }); setStep('fallback') } else onFinished(pet)
     } catch (err) {
@@ -112,24 +148,31 @@ export function CreatePetFlow({ engine, serverStatus, onCreated, onFinished, onC
 
     {step === 'input' && <>
       <h2 id="cp-title">Show us your {species}.</h2>
-      <p className="modal-intro">One clear photo of the whole animal works best.</p>
+      <p className="modal-intro">Upload an image of your pet or pick a sample photo to create a 3D model.</p>
       <Steps n={stepNo} />
       <div className="input-tabs" role="tablist">
         <button role="tab" aria-selected={source === 'upload'} className={source === 'upload' ? 'active' : ''} onClick={() => setSource('upload')}><Upload size={13} /> Upload image</button>
         <button role="tab" aria-selected={source === 'camera'} className={source === 'camera' ? 'active' : ''} onClick={() => setSource('camera')}><Camera size={13} /> Take photo</button>
       </div>
-      {source === 'upload' && (image ? <Picked url={preview} onReset={() => setImages({ ...images, upload: null })} /> : <UploadZone onPick={(blob) => setImages({ ...images, upload: blob })} />)}
-      {source === 'camera' && (image ? <Picked url={preview} onReset={() => setImages({ ...images, camera: null })} label="Retake" /> : <CameraCapture onCapture={(blob) => setImages({ ...images, camera: blob })} />)}
-      <div style={{ display: 'flex', justifyContent: 'center', margin: '6px 0 10px' }}>
-        <button type="button" className="text-button" style={{ fontSize: '0.82rem', color: '#687782', textDecoration: 'underline', cursor: 'pointer' }} onClick={async () => {
-          const blob = await createSamplePhoto(species)
-          setImages(prev => ({ ...prev, [source]: blob }))
-          if (!name) setName(species === 'cat' ? 'Miso' : 'Biscuit')
-        }}>
-          ✦ Use a sample {species} photo
-        </button>
+      {source === 'upload' && (image ? <Picked url={preview} onReset={() => { setImages({ ...images, upload: null }); setMatched(null) }} /> : <UploadZone onPick={handleImagePicked} />)}
+      {source === 'camera' && (image ? <Picked url={preview} onReset={() => { setImages({ ...images, camera: null }); setMatched(null) }} label="Retake" /> : <CameraCapture onCapture={handleImagePicked} />)}
+
+      {matched && <div className="cp-banner" style={{ background: '#f0f8db', borderColor: '#bed67c', color: '#445b20', marginTop: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <Sparkles size={15}/><span>Recognised <strong>{matched.name}</strong> ({matched.species === 'dog' ? 'Dog' : 'Cat'}) from photo</span>
+      </div>}
+
+      <div style={{ margin: '14px 0 10px' }}>
+        <div style={{ fontSize: '11px', color: '#748380', marginBottom: '7px', fontWeight: 600 }}>Or choose a sample pet:</div>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {KNOWN_DOGS.slice(0, 6).map((k) => (
+            <button key={k.id} type="button" className="text-button" style={{ fontSize: '0.8rem', padding: '4px 9px', borderRadius: '6px', background: '#f0f3eb', border: '1px solid #dce2d8', color: '#384d46', cursor: 'pointer' }} onClick={() => void loadKnownSample(k)}>
+              {k.species === 'dog' ? '🐶' : '🐱'} {k.name} ({k.species})
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="name-field"><label htmlFor="pet-name">What should we call them?</label><input id="pet-name" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder={`e.g. ${SPECIES.find((s) => s.id === species)!.defaultName}`} /></div>
+
+      <div className="name-field"><label htmlFor="pet-name">What should we call them?</label><input id="pet-name" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder={`e.g. ${matched?.name || SPECIES.find((s) => s.id === species)!.defaultName}`} /></div>
       {offline && <p className="cp-banner" role="status">The Fetch server is offline. Start it with "pnpm dev" in apps/server to create pets.</p>}
       <div className="modal-actions"><button className="text-button" onClick={() => setStep('species')}>Back</button><button type="button" className="text-button" onClick={onClose} style={{ marginLeft: 'auto', marginRight: '8px' }}>Explore Desk</button><button className="primary-button compact" disabled={!image || offline} onClick={() => void run()}>Create {petName} <Sparkles size={16} /></button></div>
     </>}

@@ -73,7 +73,7 @@ describe('claudeBrain through the runner', () => {
     ]);
     const a = await buildB1App({ brain: claudeBrain({ agentModel: 'claude-opus-5-5' }, client), config: { mockConnectors: true, demoUserId: 'llm-1' } });
     apps.push(a);
-    const runId = (await a.app.inject({ method: 'POST', url: '/agent/run', payload: { petId: 'bird', text: 'find my budget sheet' } })).json().runId;
+    const runId = (await a.app.inject({ method: 'POST', url: '/agent/run', payload: { petId: 'dog', text: 'find my budget sheet' } })).json().runId;
     const ev = await waitDone(a, runId);
 
     expect(ev.map(e => e.type)).toEqual(['run.started', 'run.plan', 'run.say', 'tool.start', 'tool.progress', 'tool.end', 'run.say', 'run.result']);
@@ -83,7 +83,7 @@ describe('claudeBrain through the runner', () => {
     expect(first.model).toBe('claude-opus-5-5');
     expect(first.tool_choice).toBeUndefined();          // forced tool_choice 400s on this model
     expect(first.system[0].text).toContain('<untrusted_data>');
-    expect(first.system[1].text).toContain('Kiwi');
+    expect(first.system[1].text).toContain('Biscuit');
     expect(first.messages[0].content).toContain('<request>find my budget sheet</request>');
     // Second request: assistant turn echoed unchanged (thinking included), then one result per tool_use.
     expect(second.messages[1].content[0].type).toBe('thinking');
