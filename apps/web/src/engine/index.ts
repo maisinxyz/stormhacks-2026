@@ -226,7 +226,7 @@ export class Engine implements PetEngine {
   private host(): BehaviorHost {
     return {
       bounds: () => {
-        if (this.view === 'room' || this.view === 'camera') return { xmin: -3.55, xmax: 3.55, zmin: -2.55, zmax: 2.55 };
+        if (this.view === 'room' || this.view === 'camera') return { xmin: -4.75, xmax: 4.75, zmin: -3.45, zmax: 3.45 };
         const r = this.renderer.domElement.getBoundingClientRect();
         const a = this.toWorld(r.left + 4, r.top + r.height / 2), b = this.toWorld(r.right - 4, r.top + r.height / 2);
         return { xmin: a?.x ?? -2, xmax: b?.x ?? 2 };
