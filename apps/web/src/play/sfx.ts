@@ -1,33 +1,72 @@
-// A synthesized dog bark for the Play camera (no audio files). Two short "woofs": a falling sawtooth through a
-// band-pass plus a puff of noise. It is only played after the microphone has closed, so it cannot be heard as a command.
+// Synthesized pet calls for the Play room, camera view and Desk (no audio files): a puppy's "yip yip" for dogs and a
+// little "mew" for cats. They are short and high on purpose: cute, not scary. They are only played after the microphone
+// has closed, so they cannot be heard as a command.
 let ctx: AudioContext | undefined;
 
-function woof(c: AudioContext, t: number, pitch: number, vol: number) {
-  const o = c.createOscillator(), band = c.createBiquadFilter(), g = c.createGain();
-  o.type = 'sawtooth';
-  o.frequency.setValueAtTime(430 * pitch, t); o.frequency.exponentialRampToValueAtTime(160 * pitch, t + 0.14);
-  band.type = 'bandpass'; band.Q.value = 1.1;
-  band.frequency.setValueAtTime(950, t); band.frequency.exponentialRampToValueAtTime(420, t + 0.14);
-  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
-  o.connect(band).connect(g).connect(c.destination);
-  o.start(t); o.stop(t + 0.19);
-  // breath: a short noise burst gives the bark its rough edge
-  const n = c.createBufferSource(), buf = c.createBuffer(1, Math.ceil(c.sampleRate * 0.12), c.sampleRate), d = buf.getChannelData(0);
-  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
-  const ng = c.createGain(), hp = c.createBiquadFilter();
-  hp.type = 'highpass'; hp.frequency.value = 700;
-  ng.gain.value = vol * 0.35;
-  n.buffer = buf; n.connect(hp).connect(ng).connect(c.destination); n.start(t);
+/** One puppy yip: a quick rise and fall in pitch through a bright, nasal filter, plus a puff of breath. */
+function yip(c: AudioContext, t: number, pitch: number, vol: number) {
+  const f0 = 560 * pitch;
+  const body = c.createOscillator(), air = c.createOscillator(), band = c.createBiquadFilter(), g = c.createGain(), airGain = c.createGain();
+  body.type = 'triangle'; air.type = 'sine';
+  for (const [o, k] of [[body, 1], [air, 2]] as const) {
+    o.frequency.setValueAtTime(f0 * 0.78 * k, t);
+    o.frequency.exponentialRampToValueAtTime(f0 * 1.55 * k, t + 0.05);
+    o.frequency.exponentialRampToValueAtTime(f0 * 1.05 * k, t + 0.14);
+  }
+  airGain.gain.value = 0.35;
+  band.type = 'bandpass'; band.Q.value = 1.6;
+  band.frequency.setValueAtTime(1300, t); band.frequency.exponentialRampToValueAtTime(2300, t + 0.05); band.frequency.exponentialRampToValueAtTime(1500, t + 0.14);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.012); g.gain.exponentialRampToValueAtTime(vol * 0.6, t + 0.08); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+  body.connect(band); air.connect(airGain).connect(band); band.connect(g).connect(c.destination);
+  body.start(t); air.start(t); body.stop(t + 0.18); air.stop(t + 0.18);
+  breath(c, t, 0.07, vol * 0.18);
 }
 
-/** "Woof woof". Silently does nothing if audio is unavailable or blocked. */
-export function bark(volume = 0.45) {
+/** One small "mee-ow": the pitch glides up and back down, with a wobble, and the vowel filter opens and closes. */
+function mew(c: AudioContext, t: number, pitch: number, vol: number) {
+  const f0 = 640 * pitch, dur = 0.46;
+  const o = c.createOscillator(), o2 = c.createOscillator(), lfo = c.createOscillator(), lfoDepth = c.createGain(), band = c.createBiquadFilter(), g = c.createGain();
+  o.type = 'triangle'; o2.type = 'sine';
+  for (const [x, k] of [[o, 1], [o2, 2]] as const) {
+    x.frequency.setValueAtTime(f0 * 0.9 * k, t);
+    x.frequency.exponentialRampToValueAtTime(f0 * 1.6 * k, t + 0.14);
+    x.frequency.exponentialRampToValueAtTime(f0 * 1.05 * k, t + dur);
+  }
+  lfo.frequency.value = 7; lfoDepth.gain.value = 14;
+  lfo.connect(lfoDepth); lfoDepth.connect(o.frequency); lfoDepth.connect(o2.frequency);
+  const og = c.createGain(); og.gain.value = 0.3;
+  band.type = 'bandpass'; band.Q.value = 3;
+  band.frequency.setValueAtTime(900, t); band.frequency.exponentialRampToValueAtTime(2400, t + 0.15); band.frequency.exponentialRampToValueAtTime(1200, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.05); g.gain.exponentialRampToValueAtTime(vol * 0.7, t + 0.26); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(band); o2.connect(og).connect(band); band.connect(g).connect(c.destination);
+  for (const x of [o, o2, lfo]) { x.start(t); x.stop(t + dur + 0.02); }
+}
+
+/** A short burst of high-passed noise: the breath at the start of a sound. */
+function breath(c: AudioContext, t: number, secs: number, vol: number) {
+  const n = c.createBufferSource(), buf = c.createBuffer(1, Math.ceil(c.sampleRate * secs), c.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+  const hp = c.createBiquadFilter(), g = c.createGain();
+  hp.type = 'highpass'; hp.frequency.value = 2500; g.gain.value = vol;
+  n.buffer = buf; n.connect(hp).connect(g).connect(c.destination); n.start(t);
+}
+
+export interface PetCall { /** seconds from now */ at: number; dur: number }
+/** A cute call: `count` quick yips for a dog, or `count` mews for a cat. Returns when each one sounds. Silent (and empty) if
+ *  audio is blocked. */
+export function petCall(species: string, count = 1, volume = 0.45): PetCall[] {
   try {
     ctx ??= new AudioContext();
     if (ctx.state === 'suspended') void ctx.resume();
-    const t = ctx.currentTime + 0.02;
-    woof(ctx, t, 1, volume); woof(ctx, t + 0.21, 0.88, volume * 0.9);
-  } catch { /* no audio: the bubble and the head jerk still show the bark */ }
+    const start = ctx.currentTime + 0.02, out: PetCall[] = [];
+    const pitches = [1, 1.14, 0.96, 1.2];
+    for (let i = 0; i < count; i++) {
+      const pitch = pitches[i % pitches.length], v = volume * (i === 0 ? 1 : 0.9);
+      if (species === 'cat') { const at = i * 0.6; mew(ctx, start + at, pitch, v); out.push({ at: at + 0.02, dur: 0.46 }); }
+      else { const at = i * 0.2; yip(ctx, start + at, pitch, v); out.push({ at: at + 0.02, dur: 0.16 }); }
+    }
+    return out;
+  } catch { return []; /* no audio: the head bob still shows the call */ }
 }
 
 // ---- first-person room effects (same idea: synthesized, no files) ----

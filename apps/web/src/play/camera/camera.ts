@@ -2,10 +2,8 @@
 // stacked on top (transparent), and the phone's orientation drives the 3D camera so the dog stays put in the room.
 import * as THREE from 'three';
 import { interpret, type CommandId } from '../commands';
-import { bark } from '../sfx';
 import { commandSteps } from '../tricks';
-import { sayLine, SPOKEN, type LineId } from '../../voice/lines';
-import { hush } from '../../voice/tts';
+import { callOut, react, SPOKEN, type LineId } from '../../voice/petcall';
 import { PushToTalk } from '../voice';
 import type { OrientationStatus } from './pose';
 import type { LocalIntent } from '@fetch/contracts';
@@ -261,7 +259,6 @@ export class CameraView implements PlayView {
   /** The dog listens (head up, ears perked) from the moment the mic opens until it has a command, and the UI shows the stage. */
   private voiceState(s: 'idle' | 'listening' | 'interpreting') {
     this.ui.setVoice(s);
-    if (s === 'listening') hush(); // the pet stops talking so the mic does not hear it
     this.ctx.engine.setListening(s !== 'idle');
     if (s !== 'idle') this.alive.focus(10);
     window.clearInterval(this.levelTimer);
@@ -315,15 +312,12 @@ export class CameraView implements PlayView {
     e.perform([{ call: () => e.faceToward(e.camera.position.x, e.camera.position.z) }, { call: () => e.flourish('heart') }, { clip: 'wag', secs: 2 }]);
   }
 
-  /** The pet says a line in its own voice (ElevenLabs), head bobbing with the sound. */
-  private say(id: LineId) {
-    const e = this.ctx.engine;
-    sayLine(id, this.ctx.session.bundle, a => e.setSpeaking(a), () => this.ui.toast('The pet\'s voice is unavailable (ElevenLabs).', 4000));
-  }
+  /** The pet reacts with a cute call (yips or a mew), head bobbing with the sound. */
+  private say(id: LineId) { const e = this.ctx.engine; react(id, this.ctx.session.bundle, a => e.setSpeaking(a)); }
 
   private woof() {
-    bark();
     const e = this.ctx.engine, p = e.petPosition;
+    void callOut(this.ctx.session.bundle, a => e.setSpeaking(a), 2);
     p.y += 1.05 * e.scaleNow;
     const n = p.project(e.camera);
     this.ui.bubble('Woof!', (n.x + 1) / 2 * innerWidth, (1 - n.y) / 2 * innerHeight);

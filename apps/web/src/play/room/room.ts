@@ -5,7 +5,7 @@ import type { PetBundle } from '@fetch/contracts';
 import { KNOWN_DOGS, knownBundle } from '../../engine/sdf/known';
 import type { CommandId } from '../commands';
 import { createRoomScene, ROOM_SPEC, type RoomScene } from '../scene';
-import { bark, crunch, thump, whoosh } from '../sfx';
+import { crunch, thump, whoosh } from '../sfx';
 import { Talk } from '../talk';
 import { commandSteps } from '../tricks';
 import type { PlayContext, PlayView } from '../types';
@@ -13,8 +13,7 @@ import { FirstPerson } from './fps';
 import { ITEMS, RoomHud, type ItemId } from './hud';
 import { ROOM_SPOTS } from './spots';
 import { Toys3D } from './toys3d';
-import { sayLine, SPOKEN, type LineId } from '../../voice/lines';
-import { hush } from '../../voice/tts';
+import { callOut, react, SPOKEN, type LineId } from '../../voice/petcall';
 
 const PET_SCALE = 0.65;       // a little bigger than the old orbit view: the player now stands next to it
 const NOTICE = 3.2;           // metres: closer than this, the pet looks at the player
@@ -83,7 +82,7 @@ export class RoomView implements PlayView {
     window.removeEventListener('keydown', this.onKey);
     const state = ctx.engine.getPetState();
     ctx.session.position = { x: state.x, z: state.z }; ctx.session.heading = state.heading;
-    hush(); ctx.engine.setSpeaking(0);
+    ctx.engine.setSpeaking(0);
     ctx.engine.setLookAt(null); ctx.engine.setListening(false); ctx.engine.setPointerInteractions(true);
     ctx.engine.setFurnitureSpots([]); ctx.engine.setRoomColliders([]); ctx.engine.setOverlayScene(null);
     this.following = false;
@@ -122,7 +121,7 @@ export class RoomView implements PlayView {
     fps.onLock = locked => { if (locked && !greeted) { greeted = true; this.voiceLine('greeting'); } };
 
     this.talk = new Talk({
-      toast: (t, ms) => hud.toast(t, ms), setVoice: s => { hud.setVoice(s); if (s === 'listening') hush(); /* the pet stops talking so the mic does not hear it */ }, micLevel: v => hud.micLevel(v),
+      toast: (t, ms) => hud.toast(t, ms), setVoice: s => hud.setVoice(s), micLevel: v => hud.micLevel(v),
       listening: on => ctx.engine.setListening(on),
       run: id => this.run(id), love: () => this.love(),
     });
@@ -245,14 +244,11 @@ export class RoomView implements PlayView {
     this.voiceLine('unknown');
     e.perform([{ call: () => e.faceToward(eye.x, eye.z) }, { call: () => e.flourish('heart') }, { clip: 'wag', secs: 2 }]);
   }
-  /** The pet says a line in its own voice (ElevenLabs), head bobbing with the sound. */
-  private voiceLine(id: LineId) {
-    const ctx = this.ctx;
-    if (ctx) sayLine(id, ctx.session.bundle, a => ctx.engine.setSpeaking(a), () => this.hud?.toast('The pet\'s voice is unavailable (ElevenLabs).', 4000));
-  }
+  /** The pet reacts with a cute call (yips or a mew), head bobbing with the sound. */
+  private voiceLine(id: LineId) { const ctx = this.ctx; if (ctx) react(id, ctx.session.bundle, a => ctx.engine.setSpeaking(a)); }
 
   private woof() {
-    bark();
+    if (this.ctx) void callOut(this.ctx.session.bundle, a => this.ctx!.engine.setSpeaking(a), 2);
     const e = this.ctx!.engine, p = e.petPosition;
     p.y += 1.05 * e.scaleNow;
     const n = p.project(e.camera);

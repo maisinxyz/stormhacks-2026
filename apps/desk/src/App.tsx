@@ -11,7 +11,7 @@ import { PetSwitcher, ServerPill } from './pets/PetSwitcher'
 import { usePetSync } from './pets/usePetSync'
 import { unlockMicrophone } from './voice'
 import { ScribeListener } from '@fetch/web/src/voice/scribe'
-import { speak as speakInPetVoice } from '@fetch/web/src/voice/tts'
+import { callOut } from '@fetch/web/src/voice/petcall'
 import { FetchApiClient, type ApprovalState, type NotificationItem, type RunState, type SettingsState } from './api'
 import { useFetchStore } from './store'
 
@@ -100,9 +100,9 @@ function App() {
     if (!appState.settings.voiceEnabled) return
     stopListening()
     setSpeaking(true)
-    // the pet's own ElevenLabs voice (its voiceId, else the species default); the engine lip-syncs to the loudness
-    speakInPetVoice(text, { species: pet?.species ?? 'dog', voiceId: pet?.voiceId, volume: appState.settings.volume / 100, onAmplitude: (amplitude) => engine.setSpeaking(amplitude), onDone: () => setSpeaking(false) })
-      .catch((err) => { console.warn('pet voice unavailable', err); engine.setSpeaking(0); setSpeaking(false) })
+    // the pet answers with a cute call (puppy yips or a mew), longer replies get more of them; the text shows in its bubble
+    void callOut({ species: pet?.species ?? 'dog' }, (amplitude) => engine.setSpeaking(amplitude), Math.max(1, Math.min(3, Math.round(text.length / 35))), 0.6 * appState.settings.volume / 100)
+      .finally(() => setSpeaking(false))
   }
 
   const handleCommand = (text: string) => {
