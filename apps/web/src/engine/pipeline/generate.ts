@@ -45,6 +45,7 @@ const form = (o: Record<string, Blob | string>) => {
 };
 
 const isQuota = (err: unknown): err is GenError => err instanceof GenError && err.code === 'gen_quota';
+const MIN_MODELING_MS = 4500;
 
 /**
  * The bundled pets are already modelled, but the creation experience should
@@ -116,12 +117,18 @@ export async function generatePet(api: string, input: GenInput, onProgress: Prog
   // 3D path; gen_quota is surfaced. Any other gen_* failure, low quality, or unreadable output falls back to the
   // 2.5D sprite rig (same template + clips) and reports it via the 'fallback' stage.
   const solid = async (): Promise<Gaussians> => {
+    const modelingStarted = Date.now();
     p('3d', 0.2);
     const { jobId } = await json<{ jobId: string }>(await postJson('/gen/image-to-3d', { imageIds: [imageId], species: input.species }));
     let splatUrl = '';
     for (let t = 0; t < 180; t++) { // ~3 min cap
       const j = await json<{ status: string; splatUrl?: string; error?: string; retryAfter?: number }>(await fetch(`${api}/gen/jobs/${jobId}`, { credentials: 'include' }));
-      if (j.status === 'done' && j.splatUrl) { splatUrl = j.splatUrl; break; }
+      if (j.status === 'done' && j.splatUrl) {
+        const remaining = MIN_MODELING_MS - (Date.now() - modelingStarted);
+        if (remaining > 0) await new Promise<void>(resolve => setTimeout(resolve, remaining));
+        splatUrl = j.splatUrl;
+        break;
+      }
       if (j.status === 'failed') throw new GenError(j.error ?? 'gen_failed', j.error ?? 'gen_failed', j.retryAfter);
       p('3d', 0.2 + 0.5 * Math.min(1, t / 90));
       await new Promise(r => setTimeout(r, 1000));

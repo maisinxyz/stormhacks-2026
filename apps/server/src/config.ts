@@ -9,7 +9,10 @@ const schema = z.object({
   HOST: z.string().default('127.0.0.1'), PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   PUBLIC_URL: z.url().default('http://localhost:3001'),
   WEB_ORIGINS: z.string().default('http://localhost:5173,http://localhost:5174'),
-  DATA_DIR: z.string().default('./data'), DEV_AUTH: flag('0'), MOCK_GEN: flag('0'), MOCK_VOICE: flag('0'),
+  DATA_DIR: z.string().default('./data'), DEV_AUTH: flag('0'),
+  // A deployment with no provider configuration should still be usable for the
+  // demo. Set MOCK_GEN=0 explicitly when the live image-to-3D provider is ready.
+  MOCK_GEN: flag('1'), MOCK_VOICE: flag('0'),
   ASSET_SIGNING_SECRET: z.string().default(''), ASSET_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
   GEN_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600000).default(300000),
   // Empty selects Replicate when its token is set, else the free Hugging Face Space.
