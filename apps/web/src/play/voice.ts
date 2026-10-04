@@ -1,11 +1,11 @@
 // Voice input for the Play shell (play.md B.7 / A.7): records a turn and returns what was said. commands.ts decides what it means.
 // ponytail: browser speech recognition only (Chrome, Safari); swap in the F2 ElevenLabs Scribe path when the Play shell
 // shares a build with apps/desk.
-import { interpret, SURE } from './commands';
+import { interpret, interpretBest, SURE } from './commands';
 import { loadWhisper, rms, toPcm, transcribe } from './whisper';
 
 interface Recognition {
-  lang: string; interimResults: boolean; continuous: boolean;
+  lang: string; interimResults: boolean; continuous: boolean; maxAlternatives: number;
   onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
   onerror: ((e: { error: string }) => void) | null;
   onend: (() => void) | null;
@@ -48,8 +48,15 @@ export class PushToTalk {
     this.supported = !!Ctor || (typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia);
     if (!Ctor) return;
     const r = (this.rec = new Ctor());
-    r.lang = 'en-US'; r.interimResults = false; r.continuous = false;
-    r.onresult = e => { this.heard = Array.from(e.results).map(x => x[0].transcript).join(' '); };
+    r.lang = 'en-US'; r.continuous = false;
+    r.interimResults = true;  // partial results too: a clear command is acted on while the user is still finishing the sentence
+    r.maxAlternatives = 5;    // the recognizer's other guesses ("sit", "set", "sieve"): the matcher picks the one that is a command
+    r.onresult = e => {
+      // for each stretch of speech take the alternative that is the clearest command, then join the stretches
+      const parts = Array.from(e.results).map(res => interpretBest(Array.from(res as ArrayLike<{ transcript: string }>, a => a.transcript)).text);
+      this.heard = parts.join(' ');
+      if (this.state === 'listening' && this.heard) this.offer(this.heard, this.turn, false, true);
+    };
     r.onerror = e => { if (e.error !== 'aborted' && e.error !== 'no-speech') this.browserFailed = e.error; };
     r.onend = () => { this.browserText = this.heard; this.heard = ''; if (this.browserText) this.offer(this.browserText, this.turn, false); };
   }
@@ -141,10 +148,21 @@ export class PushToTalk {
   }
 
   /** Deliver a transcript once per turn: a recognised command at once, anything else only from Whisper. */
-  private offer(text: string, turn: number, fromWhisper: boolean) {
+  private offer(text: string, turn: number, fromWhisper: boolean, early = false) {
     if (turn !== this.turn || this.done) return;
     // a clear command from the fast recognizer needs no second opinion
-    if ((interpret(text)?.score ?? 0) >= SURE || fromWhisper) { this.done = true; this.set('idle'); this.onText(text); }
+    if ((interpret(text)?.score ?? 0) >= SURE || fromWhisper) {
+      this.done = true;
+      if (early) this.cut(); // heard it while the user was still speaking: stop listening now
+      this.set('idle'); this.onText(text);
+    }
+  }
+
+  /** Stop listening without interpreting (the command was already understood). */
+  private cut() {
+    this.stopWatching();
+    try { this.rec?.abort(); } catch { /* not running */ }
+    if (this.recorder?.state === 'recording') this.recorder.stop();
   }
 
   /** Whisper had nothing: fall back to what the browser heard, or say that nothing came through. */

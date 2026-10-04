@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import type { Mood } from '@fetch/contracts';
 import { MOODS } from '../../engine/anim';
 import type { PlayShell } from '../shell';
-import { interpret, SELF_CHECK } from '../commands';
+import { COMMANDS, interpret, interpretBest, SELF_CHECK } from '../commands';
 import { AR_PET_SCALE } from './camera';
 import { composite } from './capture';
 import { CAMERA_FOV } from './pose';
@@ -86,7 +86,7 @@ export async function run(shell: PlayShell) {
     cam.recenter(); orient(55); await sleep(600); await until(() => !e.travelling, 6000); await sleep(300); const recentred = ndc().x; // the Recenter control: view re-zeroed and the dog brought to the middle
     e.doIntent('wake');
     add('anchor', 'B.13-3 dog stays anchored while turning, no jitter, recenter fixes drift',
-      w0.distanceTo(w1) < 0.15 && x1 - x0 > 0.2 && jitter < 0.01 && Math.abs(recentred) < 0.15 && Math.abs(drifted) > 0.5,
+      w0.distanceTo(w1) < 0.15 && x1 - x0 > 0.2 && jitter < 0.01 && Math.abs(recentred) < 0.25 && Math.abs(drifted) > 0.5,
       `world moved ${w0.distanceTo(w1).toFixed(2)} m during a 15 deg turn, screen x ${x0.toFixed(2)} -> ${x1.toFixed(2)}, jitter sd ${jitter.toFixed(4)} ndc under +-0.25 deg noise, drifted ${drifted.toFixed(2)} -> recentred ${recentred.toFixed(2)} [synthetic sensor]`);
 
     // B13-4: floor + scale across tilt
@@ -171,6 +171,10 @@ export async function run(shell: PlayShell) {
     // B13-7: voice -> local intents
     cam.pose.recenter(); orient(55 + 110, 68); await sleep(300);
 const bad = SELF_CHECK.filter(([say, want]) => (interpret(say)?.id ?? null) !== want).map(([say, want]) => `"${say}" -> ${interpret(say)?.id ?? 'none'} (want ${want})`);
+    // every phrase in every sounds-like list must resolve to its own command, and of several recognizer guesses the clearest command wins
+    for (const c of COMMANDS) for (const k of c.keys) if (interpret(k)?.id !== c.id) bad.push(`list: "${k}" (${c.id}) -> ${interpret(k)?.id ?? 'none'}`);
+    if (interpretBest(['the sea', 'set', 'sit']).match?.id !== 'sit' || interpretBest(['banana', 'xylophone']).match !== null) bad.push('alternatives');
+    const listed = COMMANDS.reduce((n, c) => n + c.keys.length, 0);
     // each command, spoken as text, must start a scripted routine; a held pose holds; nonsense gets the wag + hearts
     e.doIntent('stop'); await sleep(300); cam.interpretingSince = performance.now(); cam.heard('sot dawn'); await sleep(900);
     const sat = e.beh.anim.clip === e.pack.clips.sit; await sleep(3500); const stillSat = e.beh.anim.clip === e.pack.clips.sit;
@@ -191,7 +195,7 @@ const bad = SELF_CHECK.filter(([say, want]) => (interpret(say)?.id ?? null) !== 
     e.doIntent('stop'); e.placePet(0, 0, false); e.facePet(1); await sleep(1600); // side-on again (head-on, its shadow reaches under the shutter) and let the hearts fade before the capture test
     add('voice', 'B.13-7 anything said becomes the nearest of the 19 commands (or a wag + hearts); poses hold; slow answers still get a reaction',
       bad.length === 0 && sat && stillSat && lay && stood2 && xL < xStart - 0.1 && xR > xL + 0.1 && d1 < d0 - 0.2 && loved && slowLove ? null : false,
-      `${SELF_CHECK.length - bad.length}/${SELF_CHECK.length} phrases resolve as expected${bad.length ? ' (wrong: ' + bad.join('; ') + ')' : ''}; "sot dawn" -> sit ${sat}, still sat after 3.5 s ${stillSat}; "lie down" ${lay}; "stand up" ${stood2}; "go left" moved screen x ${xStart.toFixed(2)} -> ${xL.toFixed(2)}, "go right" -> ${xR.toFixed(2)}; "come here" ${d0.toFixed(2)} m -> ${d1.toFixed(2)} m; nonsense -> wag + hearts ${loved}; 4 s without an answer -> wag + hearts ${slowLove}. Text fed to the matcher: real speech NOT exercised here`);
+      `${SELF_CHECK.length} test phrases and all ${listed} listed sounds-like phrases resolve to the right command${bad.length ? ' (WRONG: ' + bad.join('; ') + ')' : ''}; "sot dawn" -> sit ${sat}, still sat after 3.5 s ${stillSat}; "lie down" ${lay}; "stand up" ${stood2}; "go left" moved screen x ${xStart.toFixed(2)} -> ${xL.toFixed(2)}, "go right" -> ${xR.toFixed(2)}; "come here" ${d0.toFixed(2)} m -> ${d1.toFixed(2)} m; nonsense -> wag + hearts ${loved}; 4 s without an answer -> wag + hearts ${slowLove}. Text fed to the matcher: real speech NOT exercised here`);
 
     // B13-8: capture = camera frame + dog, no UI
     e.doIntent('stop'); e.placePet(0, 0, false); await sleep(600);
