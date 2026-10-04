@@ -186,10 +186,10 @@ kbd { font: 700 10px var(--font-text); color: #485c46; padding: 4px 6px; border-
 .pet-stage { top: 199px; left: 52%; width: 226px; height: 317px; transform: translateX(-50%); z-index: 1; }
 .pet-illustration { width: 218px; height: 257px; display: block; font-size: inherit; text-shadow: none; animation: none; position: relative; }
 .mascot { width: 100%; height: 100%; overflow: visible; }
-.pip-eyes { transform-origin: 120px 110px; }.pip-wing { transform-origin: 79px 138px; }.pip-tail { transform-origin: 110px 180px; }
-.in-view .pip-eyes { animation: pip-blink 6.8s infinite; }
-.in-view .pip-wing { animation: wing-flick 8s ease-in-out infinite; }
-.in-view .pip-tail { animation: tail-flick 9s ease-in-out infinite; }
+.mascot-eyes, .pip-eyes { transform-origin: 120px 110px; }.mascot-wing, .pip-wing { transform-origin: 79px 138px; }.mascot-tail, .pip-tail { transform-origin: 110px 180px; }
+.in-view .mascot-eyes, .in-view .pip-eyes { animation: pip-blink 6.8s infinite; }
+.in-view .mascot-wing, .in-view .pip-wing { animation: wing-flick 8s ease-in-out infinite; }
+.in-view .mascot-tail, .in-view .pip-tail { animation: tail-flick 9s ease-in-out infinite; }
 .pet-perch { height: 6px; width: 136px; margin: -17px auto 0; position: relative; background: #b29c72; border-radius: 50%; box-shadow: 0 5px 0 #aab78730; }
 .pet-orbit { position: absolute; inset: 38px -25px 38px; border: 1px dashed #b1be8666; border-radius: 50%; transform: rotate(-20deg); pointer-events: none; }
 .pet-orbit > svg { position: absolute; right: 9px; top: 43px; color: #748b44; }
@@ -204,9 +204,9 @@ kbd { font: 700 10px var(--font-text); color: #485c46; padding: 4px 6px; border-
 .peek-dock { right: 29px; bottom: 26px; width: 235px; border: 1px solid #375247; border-radius: 16px; padding: 0; text-align: left; background: #183735; box-shadow: 0 7px 0 #32472e12, 0 12px 24px #203d3220; }
 .peek-header { padding: 11px 14px; font: 650 11px var(--font-text); color: #e0e9cd; border-bottom: 1px solid #48634566; }.peek-live { background: #d7ed8a; width: 5px; height: 5px; }.peek-open-label { color: #c0cdb4; font-size: 9px; }
 .peek-scene { height: 137px; gap: 2px; background: radial-gradient(ellipse at 50% 20%, #345747, #183735 75%); padding-bottom: 13px; }
-.peek-vignette { height: 76px; position: relative; width: 110px; overflow: hidden; }.peek-bird { width: 68px; height: 87px; margin: 0 auto; }.peek-copy strong { font-size: 12px; color: #f3f5df; }.peek-copy small { color: #c1ceb8; font: 500 9px var(--font-text); }
+.peek-vignette { height: 76px; position: relative; width: 110px; overflow: hidden; }.peek-mascot, .peek-bird { width: 68px; height: 87px; margin: 0 auto; }.peek-copy strong { font-size: 12px; color: #f3f5df; }.peek-copy small { color: #c1ceb8; font: 500 9px var(--font-text); }
 .paper-pile { position: absolute; bottom: 4px; right: 2px; }.paper-pile i { position: absolute; bottom: 0; right: 0; width: 23px; height: 18px; border-radius: 2px; border: 1px solid #8f9d71; background: #e2e7bc; }
-.dust-puff { position: absolute; width: 8px; height: 6px; left: 14px; bottom: 10px; border-radius: 50%; background: #b6c99b; opacity: 0; }.dust-puff.second { left: 26px; animation-delay: .3s !important; }.working .dust-puff { animation: puff .8s ease-out infinite; }.working .peek-bird { animation: peek-work .8s ease-in-out infinite; }.succeeded .pip-tail { animation: tail-flick .36s ease-in-out 3; }
+.dust-puff { position: absolute; width: 8px; height: 6px; left: 14px; bottom: 10px; border-radius: 50%; background: #b6c99b; opacity: 0; }.dust-puff.second { left: 26px; animation-delay: .3s !important; }.working .dust-puff { animation: puff .8s ease-out infinite; }.working .peek-mascot, .working .peek-bird { animation: peek-work .8s ease-in-out infinite; }.succeeded .mascot-tail, .succeeded .pip-tail { animation: tail-flick .36s ease-in-out 3; }
 .desk-footer { margin-top: 18px; gap: 12px; flex-wrap: wrap; }
 .tray { min-width: 0; border-radius: 12px; background: #eeefe4; border-color: #dce1cf; gap: 10px; padding: 9px 12px; min-height: 59px; }
 .tray-icon { width: 33px; height: 33px; border-radius: 10px; background: #fffdf4; color: #768c4a; }.tray strong { color: #415438; font-size: 11px; font-weight: 750; }.tray small { color: #68765b; font-size: 9px; }
