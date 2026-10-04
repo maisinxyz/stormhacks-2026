@@ -33,6 +33,13 @@ describe('requireUser + /session', () => {
     expect(forged.json()).toEqual({ error: 'auth_required' });
   });
 
+  it('falls back to the demo user for an unknown cookie user when login is not required', async () => {
+    const { app } = await buildB1App();
+    const res = await app.inject({ method: 'GET', url: '/session', cookies: { fetch_uid: app.signCookie('gone-after-restart') } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.id).toBe('demo-user');
+  });
+
   it('accepts a correctly signed cookie for a known user', async () => {
     const { app, ctx } = await buildB1App({ config: { requireLogin: true } });
     await ctx.store.upsertUser({ id: 'u1', name: 'Ada', createdAt: new Date().toISOString() });

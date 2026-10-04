@@ -185,9 +185,9 @@ export const TOOLS: ToolDef[] = [
     name: 'calendar.update', policy: 'reversible',
     verb: i => i.attendees?.length ? 'SEND' : 'WRITE',
     description: 'Update a calendar event by id. Changing attendees sends invites, so the user must approve first.',
-    input: CalFields.partial().extend({ eventId: z.string(), title: z.string().max(300) }),
-    label: i => `Updating "${clip(i.title)}"`,
-    approval: i => inviteApproval(i.title, i.attendees, i.start),
+    input: CalFields.partial().extend({ eventId: z.string() }),
+    label: i => i.title ? `Updating "${clip(i.title)}"` : 'Updating an event',
+    approval: i => inviteApproval(i.title ?? 'an event', i.attendees, i.start),
     async run({ eventId, ...patch }, t) {
       const before = await t.connectors.calendar.get(eventId);
       const after = await t.connectors.calendar.update(eventId, patch);
