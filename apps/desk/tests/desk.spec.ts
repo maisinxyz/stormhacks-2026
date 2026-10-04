@@ -1,0 +1,136 @@
+import { test, expect } from '@playwright/test'
+
+test.beforeEach(async ({ page }) => {
+  await page.route('**/agent/run', route => route.fulfill({ status: 503, body: '{}' }))
+  await page.route('**/agent/runs/**', route => route.fulfill({ json: {} }))
+  await page.route('**/mode', route => route.fulfill({ json: { mode: 'work' } }))
+  await page.route('**/session', route => route.fulfill({ status: 503, body: '{}' }))
+  await page.route('**/pets', route => route.fulfill({ status: 503, body: '{}' }))
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'What should we fetch?' })).toBeVisible()
+})
+
+test('desktop layout, fonts, console, keyboard controls, and quiet state', async ({ page }) => {
+  const errors: string[] = []; page.on('pageerror', e => errors.push(e.message))
+  await expect(page.locator('[data-platform-moving="false"]')).toHaveCount(3)
+  await page.evaluate(() => document.fonts.ready)
+  await expect(page.locator('h1')).toHaveCSS('font-family', /Fraunces/)
+  await expect(page.locator('body')).toHaveCSS('font-family', /Nunito/)
+  const card = page.locator('[data-platform-id="inbox"]')
+  const before = await card.boundingBox()
+  await page.getByRole('button', { name: /^Move Inbox/ }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(async () => (await card.boundingBox())!.x).toBe(before!.x + 8)
+  await page.getByRole('button', { name: 'Resize Inbox' }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(async () => (await card.boundingBox())!.width).toBe(before!.width + 8)
+  await page.getByRole('button', { name: 'Inbox menu' }).click()
+  await page.getByRole('button', { name: 'Show quiet view' }).click()
+  await expect(page.getByText('Inbox at peace.')).toBeVisible()
+  await page.getByRole('button', { name: 'Help center', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Help center' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: 'Help center', exact: true })).toBeFocused()
+  await page.screenshot({ path: 'test-results/desktop.png', fullPage: true })
+  expect(errors).toEqual([])
+})
+
+test('drag, resize, scrolling and hover keep reported platform rectangles exact', async ({ page }) => {
+  await expect(page.locator('[data-platform-moving="false"]')).toHaveCount(3)
+  await page.evaluate(async () => {
+    const { DeskEngine } = await import('/src/engine/deskEngine.ts' /* @vite-ignore */)
+    const original = DeskEngine.prototype.setPlatforms
+    DeskEngine.prototype.setPlatforms = function (rects: any[]) { const r = document.querySelector('.desk-engine-canvas')!.getBoundingClientRect(); (window as any).platforms = rects.map(p => ({...p,x:p.x+r.x,y:p.y+r.y})); original.call(this, rects) }
+    window.dispatchEvent(new Event('resize'))
+  })
+  const handle = page.getByRole('button', { name: /^Move Calendar/ })
+  const box = (await handle.boundingBox())!
+  await page.mouse.move(box.x + 60, box.y + 30); await page.mouse.down()
+  await page.mouse.move(box.x - 60, box.y + 55, { steps: 12 })
+  await expect(page.locator('[data-platform-id="calendar"]')).toHaveAttribute('data-platform-moving', 'true')
+  expect(await page.evaluate(() => (window as any).platforms?.some((p: any) => p.id === 'calendar'))).toBe(false)
+  await page.mouse.up()
+  await expect(page.locator('[data-platform-moving="false"]')).toHaveCount(3)
+  await page.mouse.wheel(0, 230)
+  await expect(page.locator('.topbar')).toHaveClass(/condensed/)
+  await expect.poll(async () => page.evaluate(() => {
+    const reported = (window as any).platforms
+    return reported?.length === 3 && reported.every((p: any) => {
+      const r = document.querySelector(`[data-platform-id="${p.id}"]`)!.getBoundingClientRect()
+      return Math.abs(p.x-r.x)<.5 && Math.abs(p.y-r.y)<.5 && Math.abs(p.w-r.width)<.5 && Math.abs(p.h-r.height)<.5
+    })
+  })).toBe(true)
+})
+
+test('demo command, Peek, approval cancel and hold-to-approve', async ({ page }) => {
+  await page.getByRole('textbox', { name: 'Command Pip' }).fill('email the standup notes')
+  await page.getByRole('button', { name: 'Send command' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Send this for me?' })
+  await expect(dialog).toBeVisible({ timeout: 10000 })
+  const hold = page.getByRole('button', { name: /^Hold to approve/ })
+  await hold.focus(); await page.keyboard.down('Space'); await page.waitForTimeout(250); await page.keyboard.up('Space')
+  await expect(dialog).toBeVisible()
+  await page.getByRole('button', { name: 'Cancel', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  await expect(dialog).not.toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.getByRole('textbox', { name: 'Command Pip' }).fill('email the standup notes')
+  await page.getByRole('button', { name: 'Send command' }).click()
+  await expect(dialog).toBeVisible({ timeout: 10000 })
+  await hold.focus(); await page.keyboard.down('Space'); await expect(dialog).not.toBeVisible(); await page.keyboard.up('Space')
+  await page.keyboard.press('Escape')
+  await page.locator('.peek-dock').click()
+  await expect(page.getByText('Approved and sent.', { exact: true }).first()).toBeVisible()
+})
+
+test('mobile and reduced motion retain usable controls without overflow', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.setViewportSize({ width: 390, height: 844 }); await page.reload()
+  await expect(page.locator('[data-platform-moving="false"]')).toHaveCount(3)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.getByRole('button', { name: 'Give Pip treat 1' }).click()
+  await expect(page.locator('.toast')).toBeVisible()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Dark', exact: true }).click()
+  await expect(page.locator('.app-shell')).toHaveClass(/theme-dark/)
+  await page.keyboard.press('Escape')
+  await page.screenshot({ path: 'test-results/mobile-dark.png', fullPage: true })
+  expect(await page.locator('.habitat-dust').first().evaluate(el => getComputedStyle(el).animationName)).toBe('none')
+})
+
+test('Play preserves the room destination', async ({ page }) => {
+  await page.route('**/camera.html?pet=demo-parrot', route => route.fulfill({ body: '<h1>Room destination</h1>', contentType: 'text/html' }))
+  await page.getByRole('button', { name: 'Play', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Opening play room' })).toBeVisible()
+  await expect(page).toHaveURL(/:5174\/camera.html\?pet=demo-parrot/)
+})
+
+test('creation entry and server-synced pet switching survive the merge', async ({ page }) => {
+  const pet = { id: 'demo-parrot', name: 'Pip', species: 'bird', splatUrl: '', rigUrl: '', weightsUrl: '', thumbnailUrl: '', personality: { eager: .8, sassy: .3, anxious: .2, chatty: .9 }, stats: { energy: 80, happiness: 90, hunger: 10 }, createdAt: new Date().toISOString() }
+  await page.route('**/session', route => route.fulfill({ json: { activePetId: pet.id } }))
+  await page.route('**/pets', route => route.fulfill({ json: [pet, { ...pet, id: 'miso', name: 'Miso', species: 'cat' }] }))
+  await page.reload()
+  await page.getByRole('button', { name: 'Add a pet', exact: true }).click()
+  await page.getByRole('button', { name: /Cat Sassy/ }).click()
+  await page.getByRole('button', { name: /Choose Cat/ }).click()
+  await expect(page.getByRole('tab', { name: 'Take photo' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Draw', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.locator('.pet-switcher').click()
+  await page.getByRole('option', { name: /Miso/ }).click()
+  await expect(page.locator('.pet-nameplate')).toContainText('Miso')
+  await page.locator('.pet-switcher').click()
+  await page.getByRole('option', { name: /Pip/ }).click()
+  await expect(page.locator('.pet-nameplate')).toContainText('Pip')
+})
+
+test('a failed errand shows the sheepish error state', async ({ page }) => {
+  await page.route('**/agent/run', route => route.fulfill({ json: { runId: 'test-error' } }))
+  await page.route('**/agent/runs/test-error/events', route => route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"run.error","code":"rate_limited","message":"Try again soon"}\n\n' }))
+  await page.getByRole('textbox', { name: 'Command Pip' }).fill('find my file')
+  await page.getByRole('button', { name: 'Send command' }).click()
+  await expect(page.locator('.run-time')).toHaveText('error')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.peek-scene')).toHaveClass(/sheepish/)
+  await expect(page.locator('.peek-copy strong')).toHaveText('A little ruffled.')
+})
