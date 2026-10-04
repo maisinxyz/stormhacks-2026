@@ -1,0 +1,5 @@
+/* Full-desk transparent canvas for the real 3D pet. The engine toggles pointer-events via hitTest. */
+.desk-engine-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: none; z-index: 6; pointer-events: none; }
+.desk-engine-canvas.live { display: block; }
+/* once a real splat pet is on the desk, the placeholder glyph pet steps aside */
+.canvas-world:has(.desk-engine-canvas.has-pet) .pet-stage { display: none; }

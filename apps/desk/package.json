@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fetch/web": "workspace:*",
     "@vitejs/plugin-react": "latest",
     "vite": "latest",
     "typescript": "latest",
