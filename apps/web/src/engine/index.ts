@@ -6,11 +6,12 @@ import { Behavior, type BehaviorHost } from './behavior';
 import { Interactions } from './interactions';
 import { Needs, type Stats } from './needs';
 import { Toys } from './toys';
+import { PeekScene } from './peek';
+import { Skeleton, type Bone } from './skeleton';
 import { Props, type Prop } from './props';
 import { PACKS, type FeedItem, type SpeciesPack } from './species';
 import { MAX_BONES, SplatMesh } from './splatRenderer';
 
-interface Bone { name: string; parent: number; head: [number, number, number]; tail: [number, number, number] }
 
 export type Quality = 'high' | 'low';
 const BUDGET: Record<Quality, number> = { high: 300_000, low: 120_000 };
@@ -30,7 +31,13 @@ export class Engine implements PetEngine {
   constructor(private opts: EngineOptions = {}) {}
   private quality: Quality = 'high';
   private lowSince = 0;
-  private boneWorld: THREE.Matrix4[] = [];
+  private pr = Math.min(window.devicePixelRatio, 1.25); // splats are soft, so cap render scale; first fps rescue is dropping to 1.0
+  private sk?: Skeleton;
+  private peek?: PeekScene;
+  private peekCanvas?: HTMLCanvasElement;
+  private plan: ActionStep[] = [];
+  private get boneWorld() { return this.sk?.world ?? []; }
+  private get bones(): Bone[] { return this.sk?.bones ?? []; }
   private shadow?: THREE.Mesh;
   private beh?: Behavior;
   private pack?: SpeciesPack;
@@ -52,14 +59,13 @@ export class Engine implements PetEngine {
   private scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(35, 1, 0.05, 50);
   private splat?: SplatMesh;
-  private bones: Bone[] = [];
-  private pose: THREE.Quaternion[] = []; // local rotation per bone, about its rest-pose head
   private mode: Mode = 'work';
   private platforms: Platform[] = [];
   private raf = 0;
   onFrame?: (t: number) => void;
 
-  mount(canvas: HTMLCanvasElement, _peekCanvas: HTMLCanvasElement) {
+  mount(canvas: HTMLCanvasElement, peekCanvas: HTMLCanvasElement) {
+    this.peekCanvas = peekCanvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: false, premultipliedAlpha: true });
     this.renderer.setClearColor(0x000000, 0);
     this.camera.position.set(0, 0.8, 4.5); // near-frontal so screen x maps to world x on the z=0 stage
@@ -86,6 +92,7 @@ export class Engine implements PetEngine {
       this.toys?.step(Math.min(dt, 0.1));
       this.inter?.update(Math.min(dt, 0.1), t);
       this.updateLaser();
+      this.peek?.update(Math.min(dt, 0.1));
       if (this.splat) {
         if (this.beh) this.tickBehavior(Math.min(dt, 0.1));
         this.skin();
@@ -107,8 +114,9 @@ export class Engine implements PetEngine {
     ]);
     if (rig.bones.length > MAX_BONES) throw new Error(`rig has ${rig.bones.length} bones, max ${MAX_BONES}`);
     if (this.splat) this.scene.remove(this.splat.mesh);
-    this.bones = rig.bones;
-    this.pose = this.bones.map(() => new THREE.Quaternion());
+    this.sk = new Skeleton(rig.bones);
+    this.peek?.dispose();
+    this.peek = this.peekCanvas && new PeekScene(this.peekCanvas, PACKS[b.species], splat, weights, rig.bones);
     this.splat = new SplatMesh(splat, weights);
     this.splat.setBudget(BUDGET[this.quality]);
     this.scene.add(this.splat.mesh);
@@ -154,7 +162,8 @@ export class Engine implements PetEngine {
         const w = this.toWorld(p.x + p.w / 2, p.y);
         return w ? [{ id: p.id, x: w.x, y: Math.max(0, w.y) }] : [];
       }),
-      setVisible: v => { if (this.splat) this.splat.mesh.visible = v; },
+      // pet off the main canvas == edge-peek on (and vice versa)
+      setVisible: v => { if (this.splat) this.splat.mesh.visible = v; this.peek?.setActive(!v); },
       emit: e => this.bus.emit(e),
       burst: (k, x, y) => this.props?.burst(k, new THREE.Vector3(x, y, 0.1)),
       setCarry: p => this.props?.setCarry(p),
@@ -267,25 +276,9 @@ export class Engine implements PetEngine {
   get state() { return this.beh?.state; }
 
   /** Demo/animation hook: set a bone's local rotation (euler radians) by name. */
-  setBoneEuler(name: string, x: number, y: number, z: number) {
-    const i = this.bones.findIndex(b => b.name === name);
-    if (i >= 0) this.pose[i].setFromEuler(new THREE.Euler(x, y, z));
-  }
+  setBoneEuler(name: string, x: number, y: number, z: number) { this.sk?.setEuler(name, x, y, z); }
 
-  // World skin matrix per bone: M_b = M_parent * T(h) * R * T(-h), h = rest-pose head (parents listed before children).
-  private skin() {
-    const world: THREE.Matrix4[] = [];
-    const out = this.splat!.uniforms.uBones.value;
-    this.bones.forEach((b, i) => {
-      const h = new THREE.Vector3(...b.head);
-      const m = new THREE.Matrix4().makeTranslation(h.x, h.y, h.z)
-        .multiply(new THREE.Matrix4().makeRotationFromQuaternion(this.pose[i]))
-        .multiply(new THREE.Matrix4().makeTranslation(-h.x, -h.y, -h.z));
-      world[i] = b.parent >= 0 ? world[b.parent].clone().multiply(m) : m;
-      out[i].copy(world[i]);
-    });
-    this.boneWorld = world;
-  }
+  private skin() { this.sk!.update(this.splat!.uniforms.uBones.value); }
 
   /** F2 settings: splat budget. Auto-drops to `low` if fps < 24 for 3s. */
   setQuality(q: Quality) { this.quality = q; this.lowSince = 0; this.splat?.setBudget(BUDGET[q]); }
@@ -294,7 +287,11 @@ export class Engine implements PetEngine {
     if (!dt || this.quality === 'low') return;
     if (1 / dt >= 24) { this.lowSince = 0; return; }
     this.lowSince += dt;
-    if (this.lowSince > 3) this.setQuality('low');
+    if (this.lowSince > 3) {
+      this.lowSince = 0;
+      if (this.pr > 1) this.pr = 1; // stage 1: lower render scale
+      else this.setQuality('low');  // stage 2: 120k budget
+    }
   }
 
   /** Cheap hit proxy: one capsule per posed bone. Lets F2's page stay clickable under the full-page canvas. */
@@ -330,8 +327,8 @@ export class Engine implements PetEngine {
 
   private resize() {
     const c = this.renderer.domElement, w = c.clientWidth, h = c.clientHeight;
-    if (c.width !== w * devicePixelRatio || c.height !== h * devicePixelRatio) {
-      this.renderer.setPixelRatio(devicePixelRatio);
+    if (c.width !== Math.round(w * this.pr) || c.height !== Math.round(h * this.pr)) {
+      this.renderer.setPixelRatio(this.pr);
       this.renderer.setSize(w, h, false);
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
@@ -343,11 +340,15 @@ export class Engine implements PetEngine {
   // --- PetEngine surface; F1 slice 0-5h implements loading/skinning only. TODOs land in later slices. ---
   setMode(mode: Mode) { this.mode = mode; this.beh?.setMode(mode); }
   setPlatforms(p: Platform[]) { this.platforms = p; this.syncToyPlatforms(); }
-  runPlan(steps: ActionStep[]) { this.peekEvents = []; this.beh?.runPlan(steps); }
+  runPlan(steps: ActionStep[]) { this.pushToolEvent({ type: 'run.plan', steps }); }
   pushToolEvent(e: RunEvent) {
     if (e.type === 'approval.required') this.approvalActionId = e.actionId;
+    if (e.type === 'run.plan') { this.plan = e.steps; this.peekEvents = []; }
+    this.peek?.handle(e, id => this.plan.find(s => s.id === id)); // edge-peek mirrors every event 1:1
     this.beh?.pushToolEvent(e);
   }
+  /** Reaction log of the edge-peek scene (one entry per run event it reacted to). */
+  get peekLog() { return this.peek?.log ?? []; }
   showResult(prop: ActionStep['prop'], mood: Mood) { this.beh?.showResult(prop, mood); }
   setApprovalPending(pending: boolean) { this.approvalPending = pending; this.beh?.setApprovalPending(pending); }
   doIntent(i: LocalIntent) {

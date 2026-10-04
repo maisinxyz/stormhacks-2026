@@ -30,4 +30,6 @@ export interface SpeciesPack {
   voicePrompt: string;
   personality: { eager: number; sassy: number; anxious: number; chatty: number };
   verbs: Record<Verb, VerbAnim>;
+  /** Edge-peek scene (PRD 1.9): what the dock shows while the pet is off-canvas. */
+  peek: { scene: 'bush' | 'ledge' | 'burrow' | 'nest'; yaw: number; y: number; hidden?: boolean; wag: string };
 }

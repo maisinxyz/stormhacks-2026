@@ -70,3 +70,5 @@ engine.on('PET_STROKE', e => console.log('stroke', e.intensity.toFixed(2)));
 engine.on('POKE', () => console.log('poke')); engine.on('THROW', e => console.log('throw', e.vx.toFixed(1), e.vy.toFixed(1)));
 engine.on('POINT', e => console.log('point', e.x.toFixed(2))); engine.on('APPROVE', e => console.log('APPROVE', e.actionId));
 engine.onStats(s => console.log('stats', JSON.stringify(s)));
+
+if (new URLSearchParams(location.search).has('accept')) import('./acceptance').then(m => m.run(engine, bundle)); // PRD 1.10 acceptance run

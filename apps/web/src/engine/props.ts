@@ -31,6 +31,13 @@ function propTexture(p: Prop): THREE.Texture {
 
 const COLORS: Record<ParticleKind, number> = { dust: 0xb9a98c, feather: 0xffffff, dirt: 0x6b4a2b, puff: 0xfff3c4 };
 
+export function propSprite(p: Prop, size: number) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: propTexture(p), transparent: true, depthTest: false }));
+  s.scale.set(size, size, 1);
+  s.renderOrder = 10;
+  return s;
+}
+
 export class Props {
   private carry?: THREE.Sprite;
   private world?: THREE.Sprite;
@@ -47,9 +54,7 @@ export class Props {
   }
 
   private sprite(p: Prop, size: number) {
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: propTexture(p), transparent: true, depthTest: false }));
-    s.scale.set(size, size, 1);
-    s.renderOrder = 10;
+    const s = propSprite(p, size);
     this.scene.add(s);
     return s;
   }

@@ -43,7 +43,7 @@ export function fitRig(g: Gaussians, species: Species): Rig {
   const xs: number[] = [], zs: number[] = [];
   let h = 0;
   for (let i = 0; i < g.n; i++) { xs.push(Math.abs(g.pos[i * 3])); zs.push(Math.abs(g.pos[i * 3 + 2])); h = Math.max(h, g.pos[i * 3 + 1]); }
-  const hw = pct(xs, 0.98), hl = pct(zs, 0.98);
+  const hl = pct(zs, 0.98), hw = Math.max(pct(xs, 0.98), 0.25 * hl); // floor keeps limbs apart for flat (sprite-fallback) bodies
   const f = (v: T): T => [v[0] * hw, v[1] * h, v[2] * hl];
   return { template: tpl.name, bones: tpl.bones.map(b => ({ name: b.name, parent: b.parent, head: f(b.head), tail: f(b.tail) })) };
 }

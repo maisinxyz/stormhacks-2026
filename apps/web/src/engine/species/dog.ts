@@ -65,6 +65,7 @@ export const dog: SpeciesPack = {
   foods: ['treat'], games: ['ball_fetch', 'tug', 'hide_and_seek'],
   voicePrompt: 'eager, loyal, a bit overexcited scruffy dog',
   personality: { eager: 0.9, sassy: 0.2, anxious: 0.3, chatty: 0.5 },
+  peek: { scene: 'bush', yaw: Math.PI, y: -0.1, wag: 'wag' }, // tail wagging out of a bush
   verbs: {
     SEARCH: { clips: ['sniff', 'walk'], particle: 'dust' },
     FETCH: { clips: ['dig', 'run'], prop: 'carry', particle: 'dirt' },

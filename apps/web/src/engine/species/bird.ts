@@ -44,6 +44,7 @@ export const bird: SpeciesPack = {
   foods: ['seed', 'cracker'], games: ['mimic', 'land_on_cursor', 'perch_hop'],
   voicePrompt: 'chatty, gossipy parrot with a bright squawk',
   personality: { eager: 0.5, sassy: 0.4, anxious: 0.3, chatty: 0.95 },
+  peek: { scene: 'nest', yaw: 0.3, y: 0.15, wag: 'fluff' }, // in a nest, wings flapping
   verbs: {
     SEARCH: { clips: ['circle', 'scan'], particle: 'feather' },
     FETCH: { clips: ['fly', 'flapHop'], prop: 'carry', particle: 'feather' },

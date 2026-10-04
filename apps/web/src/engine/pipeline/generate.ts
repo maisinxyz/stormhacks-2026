@@ -8,8 +8,9 @@
 //   POST /pets           multipart {splat, rig, weights, thumbnail, metadata(json)} -> PetBundle
 import type { PetBundle, Species } from '@fetch/contracts';
 import { cleanupSplat, MAIN_BUDGET } from './cleanup';
-import { encodeSplat, parsePly } from './gaussians';
+import { encodeSplat, parsePly, type Gaussians } from './gaussians';
 import { fitRig, skinWeights } from './rig';
+import { spriteToGaussians } from './spriteFallback';
 
 export type Progress = (p: { stage: string; pct: number }) => void;
 export interface GenInput { kind: 'photo' | 'drawing'; image: Blob; species: Species; name: string }
@@ -45,22 +46,31 @@ export async function generatePet(api: string, input: GenInput, onProgress: Prog
   p('segment', 0.15);
   const alpha = await (await post('/gen/segment', form({ image: input.image }))).blob();
 
-  p('3d', 0.2);
-  const { jobId } = await json<{ jobId: string }>(await post('/gen/image-to-3d', JSON.stringify({ imageIds: [imageId], species: input.species }), { 'content-type': 'application/json' }));
-  let splatUrl = '';
-  for (let t = 0; t < 180; t++) { // ~3 min cap
-    const j = await json<{ status: string; splatUrl?: string; error?: string }>(await fetch(`${api}/gen/jobs/${jobId}`, { credentials: 'include' }));
-    if (j.status === 'done' && j.splatUrl) { splatUrl = j.splatUrl; break; }
-    if (j.status === 'failed') throw new GenError(j.error ?? 'gen_failed');
-    p('3d', 0.2 + 0.5 * Math.min(1, t / 90));
-    await new Promise(r => setTimeout(r, 1000));
+  // 3D path; any gen_* failure, low quality, or unreadable output falls back to the 2.5D sprite rig (same template + clips).
+  const solid = async (): Promise<Gaussians> => {
+    p('3d', 0.2);
+    const { jobId } = await json<{ jobId: string }>(await post('/gen/image-to-3d', JSON.stringify({ imageIds: [imageId], species: input.species }), { 'content-type': 'application/json' }));
+    let splatUrl = '';
+    for (let t = 0; t < 180; t++) { // ~3 min cap
+      const j = await json<{ status: string; splatUrl?: string; error?: string }>(await fetch(`${api}/gen/jobs/${jobId}`, { credentials: 'include' }));
+      if (j.status === 'done' && j.splatUrl) { splatUrl = j.splatUrl; break; }
+      if (j.status === 'failed') throw new GenError(j.error ?? 'gen_failed');
+      p('3d', 0.2 + 0.5 * Math.min(1, t / 90));
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    if (!splatUrl) throw new GenError('gen_timeout');
+    p('rig', 0.72);
+    const raw = parsePly(await (await fetch(splatUrl)).arrayBuffer());
+    const g = cleanupSplat(raw, { species: input.species, budget });
+    if (g.n < 2000 || g.n < raw.n * 0.2) throw new GenError('gen_low_quality');
+    return g;
+  };
+  let g: Gaussians;
+  try { g = await solid(); } catch (err) {
+    console.warn('image-to-3d failed, using sprite rig:', err);
+    p('fallback', 0.72);
+    g = await spriteToGaussians(alpha, input.species, budget);
   }
-  if (!splatUrl) throw new GenError('gen_timeout');
-
-  p('rig', 0.72);
-  const raw = parsePly(await (await fetch(splatUrl)).arrayBuffer());
-  const g = cleanupSplat(raw, { species: input.species, budget });
-  if (g.n < 2000 || g.n < raw.n * 0.2) throw new GenError('gen_low_quality'); // F1 caller falls back to the sprite rig (not built yet)
   const rig = fitRig(g, input.species);
   const weights = skinWeights(g, rig);
 
