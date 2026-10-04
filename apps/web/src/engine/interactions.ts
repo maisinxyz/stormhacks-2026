@@ -21,16 +21,18 @@ export interface InteractionHost {
   setRing(p: number): void;
   mode(): Mode;
   isGestureClaimed?(pointerId: number): boolean;
+  petPosition?(): { x: number; z: number };
 }
 
 export const APPROVE_SECS = 1.2; // continuous stroke needed to pet-to-approve
 
 export class Interactions {
-  private down?: { x: number; y: number; t: number; path: number; onPet: boolean; ball: boolean };
+  private down?: { x: number; y: number; t: number; path: number; onPet: boolean; ball: boolean; startWorld?: { x: number; z: number }; startPet?: { x: number; z: number }; dragTarget?: { x: number; z: number } };
   private last = { x: 0, y: 0, t: 0 };
   private speed = 0;      // px/ms, smoothed
   private revs: number[] = []; // timestamps of direction reversals (x)
   private dirX = 0;
+  private suppressClickUntil = 0;
   private strokeEmit = 0;
   private strokeT = 0;     // ms since last stroke motion
   private ring = 0;        // seconds of continuous approving stroke
@@ -49,7 +51,7 @@ export class Interactions {
     window.addEventListener('click', e => {
       // F2 normally sends POINT itself; when the click lands on the bare page, do it here
       const t = e.target as HTMLElement;
-      if ((t === document.body || t === document.documentElement) && !this.down?.onPet) this.point(e.clientX, e.clientY);
+      if ((t === document.body || t === document.documentElement) && !this.down?.onPet && performance.now() > this.suppressClickUntil) this.point(e.clientX, e.clientY);
     });
   }
 
@@ -73,7 +75,9 @@ export class Interactions {
   private onDown = (e: PointerEvent) => {
     const onPet = this.h.hitPet(e.clientX, e.clientY), ball = !onPet && this.h.hitBall(e.clientX, e.clientY);
     if (!onPet && !ball && this.h.isGestureClaimed?.(e.pointerId)) { this.down = undefined; return; }
-    this.down = { x: e.clientX, y: e.clientY, t: e.timeStamp, path: 0, onPet, ball };
+    const startWorld = onPet ? this.h.toWorld(e.clientX, e.clientY) : undefined;
+    const pet = onPet ? this.h.petPosition?.() : undefined;
+    this.down = { x: e.clientX, y: e.clientY, t: e.timeStamp, path: 0, onPet, ball, startWorld: startWorld ? { x: startWorld.x, z: Math.abs(startWorld.z) > 1e-5 ? startWorld.z : startWorld.y } : undefined, startPet: pet };
     this.last = { x: e.clientX, y: e.clientY, t: e.timeStamp };
     this.speed = 0; this.revs = []; this.dirX = 0; this.flick = [{ x: e.clientX, y: e.clientY, t: e.timeStamp }];
   };
@@ -90,13 +94,25 @@ export class Interactions {
     this.revs = this.revs.filter(t => e.timeStamp - t < 1000);
     this.last = { x: e.clientX, y: e.clientY, t: e.timeStamp };
     if (d.ball && w) { this.h.holdBall(w.x, Math.abs(w.z) > 1e-5 ? w.z : w.y); this.flick.push({ x: e.clientX, y: e.clientY, t: e.timeStamp }); this.flick = this.flick.filter(f => e.timeStamp - f.t < 100); }
-    if (d.onPet) { this.strokeT = 0; if (d.path > 12 && w) this.h.dragPet?.(w.x, Math.abs(w.z) > 1e-5 ? w.z : w.y, false); }
+    if (d.onPet) {
+      this.strokeT = 0;
+      if (d.path > 12 && w) {
+        const z = Math.abs(w.z) > 1e-5 ? w.z : w.y;
+        const start = d.startWorld, pet = d.startPet;
+        const scale = .5;
+        const x = pet && start ? pet.x + (w.x - start.x) * scale : w.x;
+        const targetZ = pet && start ? pet.z + (z - start.z) * scale : z;
+        d.dragTarget = { x, z: targetZ };
+        this.h.dragPet?.(x, targetZ, false);
+      }
+    }
   };
 
   private onUp = (e: PointerEvent) => {
     const d = this.down;
     this.down = undefined;
     if (!d) return;
+    if (d.path >= 12) this.suppressClickUntil = performance.now() + 250;
     if (d.ball) {
       // flick velocity from the last ~100ms of motion, px/s -> world units/s (stage is ~2.8 units tall)
       const a = this.flick[0], b = this.flick[this.flick.length - 1];
@@ -108,7 +124,11 @@ export class Interactions {
       this.h.emit({ type: 'THROW', vx: cl(vx), vy: cl(vy) });
       return;
     }
-    if (d.onPet && d.path >= 12) { const w = this.h.toWorld(e.clientX, e.clientY); if (w) this.h.dragPet?.(w.x, Math.abs(w.z) > 1e-5 ? w.z : w.y, true); return; }
+    if (d.onPet && d.path >= 12) {
+      const p = d.dragTarget ?? this.h.petPosition?.();
+      if (p) this.h.dragPet?.(p.x, p.z, true);
+      return;
+    }
     if (d.onPet && d.path < 6 && e.timeStamp - d.t < 400) { this.h.emit({ type: 'POKE' }); this.h.react('poke'); }
   };
 

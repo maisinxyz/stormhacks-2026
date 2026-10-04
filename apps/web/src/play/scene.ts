@@ -266,7 +266,8 @@ function addContactShadow(scene: THREE.Scene, x: number, z: number, width: numbe
   scene.add(shadow);
 }
 
-export interface RoomScene { scene: THREE.Scene; update(dt: number): void; dispose(): void; }
+export interface RoomCollider { minX: number; maxX: number; minZ: number; maxZ: number; }
+export interface RoomScene { scene: THREE.Scene; colliders: RoomCollider[]; update(dt: number): void; dispose(): void; }
 
 export function createRoomScene(_low = false): RoomScene {
   const scene = new THREE.Scene();
@@ -310,6 +311,16 @@ export function createRoomScene(_low = false): RoomScene {
   addContactShadow(scene, F.sofa.x, F.sofa.z, 1.1, 2.3);
   addContactShadow(scene, F.crib.x, F.crib.z, 1.5, 0.82);
   addContactShadow(scene, F.dogBed.x, F.dogBed.z, 1.05, 0.76);
+  const colliders: RoomCollider[] = [
+    { minX: F.sofa.x - F.sofa.depth / 2 - .12, maxX: F.sofa.x + F.sofa.depth / 2 + .12, minZ: F.sofa.z - F.sofa.width / 2 - .12, maxZ: F.sofa.z + F.sofa.width / 2 + .12 },
+    { minX: F.crib.x - F.crib.length / 2 - .1, maxX: F.crib.x + F.crib.length / 2 + .1, minZ: F.crib.z - F.crib.width / 2 - .1, maxZ: F.crib.z + F.crib.width / 2 + .1 },
+    { minX: F.console.x - F.console.depth / 2 - .1, maxX: F.console.x + F.console.depth / 2 + .1, minZ: F.console.z - F.console.width / 2 - .1, maxZ: F.console.z + F.console.width / 2 + .1 },
+    { minX: F.shelf.x - F.shelf.depth / 2 - .1, maxX: F.shelf.x + F.shelf.depth / 2 + .1, minZ: F.shelf.z - F.shelf.width / 2 - .1, maxZ: F.shelf.z + F.shelf.width / 2 + .1 },
+    { minX: F.sofa.x - .33, maxX: F.sofa.x + .33, minZ: 1.18, maxZ: 1.86 },
+    { minX: -2.58, maxX: -2.02, minZ: -3.58, maxZ: -3.05 },
+    { minX: 2.28, maxX: 2.82, minZ: -3.58, maxZ: -3.05 },
+    { minX: 4.58, maxX: 5.02, minZ: -3.5, maxZ: -3.06 },
+  ];
 
   const hemisphere = new THREE.HemisphereLight(0xfff5e6, 0x625c52, 1.35);
   hemisphere.name = 'soft-ambient-fill';
@@ -320,6 +331,7 @@ export function createRoomScene(_low = false): RoomScene {
   scene.add(daylight);
   return {
     scene,
+    colliders,
     update: (_dt: number) => {},
     dispose: () => scene.traverse((object) => {
       const mesh = object as THREE.Mesh;

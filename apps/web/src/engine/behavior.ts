@@ -17,7 +17,7 @@ export interface BehaviorHost {
   furnitureSpots?(): FurnitureSpot[];
   setVisible(v: boolean): void;
   emit(e: BusEvent): void;
-  burst(kind: ParticleKind, x: number, y: number): void;
+  burst(kind: ParticleKind, x: number, y: number, z?: number, n?: number): void;
   setCarry(p?: Prop): void;
   setWorldProp(p?: Prop, x?: number, y?: number): void;
   peek(e: RunEvent): void; // edge-peek scene hook (1.9)
@@ -52,6 +52,8 @@ export class Behavior {
   private spot?: { id: FurnitureSpot['id']; until: number };
   /** false = command-only (camera view): never walks or changes pose by itself, and held poses last until the next command. */
   private autonomous = true;
+  private dragging = false;
+  private landing = false;
 
   constructor(private pack: SpeciesPack, private host: BehaviorHost, private needs: Needs) {
     this.start(this.idle(), 'idle');
@@ -143,7 +145,7 @@ export class Behavior {
     const target = this.moving ? this.dir * Math.PI / 2 : this.dir * 0.7;
     this.yaw += (target - this.yaw) * Math.min(1, dt * 8);
     this.moving = false;
-    this.y += ((this.targetY - this.y)) * Math.min(1, dt * 10);
+    this.y += ((this.targetY - this.y)) * Math.min(1, dt * (this.landing ? 3 : 10));
     return { pose, x: this.x, y: this.y + (pose.y ?? 0), z: this.z, yaw: this.yaw + (pose.yaw ?? 0) };
   }
 
@@ -375,8 +377,28 @@ export class Behavior {
 
   dragTo(x: number, z: number, drop = false) {
     if (this.state === 'exit' || this.state === 'working' || this.state === 'return' || this.state === 'approval') return;
-    this.x = x; this.z = z; this.y = drop ? 0 : .12;
-    if (drop) this.start(this.pointRoutine(x, z), 'intent');
+    this.x = x; this.z = z;
+    if (!drop) {
+      if (!this.dragging) { this.dragging = true; this.landing = false; this.targetY = .34; this.start(this.dragHold(), 'intent'); }
+      return;
+    }
+    this.dragging = false; this.landing = true; this.targetY = 0;
+    this.start(this.landAndSettle(), 'intent');
+  }
+
+  private *dragHold(): Routine {
+    this.playClip(this.pack.clips.drag ? 'drag' : 'stand');
+    yield () => !this.dragging;
+  }
+
+  private *landAndSettle(): Routine {
+    this.playClip(this.pack.clips.land ? 'land' : 'stand');
+    yield* this.wait(.45);
+    this.host.burst('dust', this.x, 0.04, this.z, 5);
+    yield* this.wait(.22);
+    this.y = 0;
+    this.landing = false;
+    yield* this.play('stand', .25);
   }
 
   /** Hard safety rail used by the camera view: keep the body inside the visible frame. */

@@ -23,6 +23,21 @@ export const quadClips: Record<string, Clip> = {
     legFL: [sw(p, 0.5), 0, 0], legBR: [sw(p, 0.5), 0, 0], legFR: [-sw(p, 0.5), 0, 0], legBL: [-sw(p, 0.5), 0, 0],
     head: [0.1, sw(p, 0.08), 0], tail: [0, sw(p, 0.35), 0],
   }, Math.abs(sw(p * 2, 0.02))), 0.7),
+  drag: clip(0.55, true, p => P({
+    root: [0.12 + sw(p, 0.04), 0, 0],
+    legFL: [-0.72 + sw(p * 2, 0.28), 0, 0.08], legFR: [-0.72 - sw(p * 2, 0.28), 0, -0.08],
+    legBL: [0.72 - sw(p * 2, 0.24), 0, 0.06], legBR: [0.72 + sw(p * 2, 0.24), 0, -0.06],
+    head: [0.1, sw(p, 0.08), 0], tail: [0, sw(p * 1.5, 0.3), 0],
+  }, 0.08)),
+  land: clip(0.67, false, p => {
+    const e = Math.sin(p * Math.PI);
+    return P({
+      root: [-0.16 * e, 0, 0],
+      legFL: [-0.58 * e, 0, 0], legFR: [-0.58 * e, 0, 0],
+      legBL: [0.78 * e, 0, 0], legBR: [0.78 * e, 0, 0],
+      head: [0.08 * e, 0, 0], tail: [0, sw(p * 1.5, 0.18), 0],
+    }, 0.02 * e);
+  }),
   run: clip(0.42, true, p => P({
     legFL: [sw(p, 0.95), 0, 0], legFR: [sw(p, 0.95, 0.5), 0, 0], legBL: [sw(p, 0.95, 2.6), 0, 0], legBR: [sw(p, 0.95, 3.1), 0, 0],
     root: [sw(p, 0.12, 1.2), 0, 0], head: [-0.1, 0, 0], tail: [-0.3, sw(p, 0.2), 0],

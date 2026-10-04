@@ -12,6 +12,7 @@ import { Props, type Prop } from './props';
 import { PACKS, type FeedItem, type SpeciesPack } from './species';
 import { MAX_BONES, SplatMesh } from './splatRenderer';
 import { SdfPet, type PlushTraits } from './sdf/sdfPet';
+import type { RoomCollider } from '../play/scene';
 
 
 export type Quality = 'high' | 'low';
@@ -74,6 +75,7 @@ export class Engine implements PetEngine {
   private overlay?: THREE.Scene;
   private claimedGestures = new Set<number>();
   private furnitureSpots: FurnitureSpot[] = [];
+  private roomColliders: RoomCollider[] = [];
   private splat?: SplatMesh | SdfPet; // the pet's renderer: Gaussian splats, or the SDF plush dog
   private mode: Mode = 'work';
   private platforms: Platform[] = [];
@@ -162,14 +164,19 @@ export class Engine implements PetEngine {
   }
 
   private tickBehavior(dt: number) {
+    const before = this.beh!.snapshot();
     const o = this.beh!.update(dt), m = this.splat!.mesh;
-    this.constrainPetToFrame();
+    this.constrainPetToFrame(before);
+    if (this.view === 'room') {
+      const safe = this.beh!.snapshot();
+      o.x = safe.x; o.z = safe.z;
+    }
     if (this.view === 'camera') { const fixed = this.beh!.snapshot(); o.x = fixed.x; o.z = fixed.z; }
     for (const b of this.bones) this.setBoneEuler(b.name, 0, 0, 0);
     for (const [n, e] of Object.entries(o.pose.bones)) this.setBoneEuler(n, e[0], e[1], e[2]);
     // behavior y (hops, carry lift) is in metres; the clip's own y offset is authored for a 1-unit pet, so scale it
     const poseY = o.pose.y ?? 0;
-    m.position.set(o.x, o.y - poseY + poseY * this.petScale + this.groundPlane, o.z); // groundPlane = real floor height under WebXR
+    m.position.set(o.x, Math.max(this.groundPlane, o.y - poseY + poseY * this.petScale + this.groundPlane), o.z); // groundPlane = real floor height under WebXR
     m.rotation.y = o.yaw;
     m.scale.setScalar(this.petScale);
     if (this.shadow) { this.shadow.position.set(o.x, this.groundPlane + 0.002, o.z); this.shadow.rotation.y = o.yaw; this.shadow.scale.set(this.shadowSize.x * this.petScale, 1, this.shadowSize.y * this.petScale); this.shadow.visible = m.visible; }
@@ -189,8 +196,15 @@ export class Engine implements PetEngine {
   }
 
   /** Clamp the actual animated body every frame, not just its requested target. */
-  private constrainPetToFrame() {
-    if (this.view !== 'camera' || !this.beh) return;
+  private constrainPetToFrame(previous?: { x: number; z: number }) {
+    if (!this.beh) return;
+    if (this.view === 'room') {
+      const state = this.beh.snapshot();
+      const safe = previous ? this.sweepRoomPosition(previous.x, previous.z, state.x, state.z) : this.resolveRoomPosition(state.x, state.z);
+      if (Math.abs(safe.x - state.x) > .0001 || Math.abs(safe.z - state.z) > .0001) this.beh.constrainPosition(safe.x, safe.z);
+      return;
+    }
+    if (this.view !== 'camera') return;
     const state = this.beh.snapshot();
     const p = new THREE.Vector3(state.x, this.groundPlane, state.z).project(this.camera);
     const x = THREE.MathUtils.clamp(p.x, -.72, .72), y = THREE.MathUtils.clamp(p.y, -.78, .12);
@@ -199,6 +213,49 @@ export class Engine implements PetEngine {
     ray.setFromCamera(new THREE.Vector2(x, y), this.camera);
     const hit = ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -this.groundPlane), new THREE.Vector3());
     if (hit) this.beh.constrainPosition(hit.x, hit.z);
+  }
+
+  private resolveRoomPosition(x: number, z: number) {
+    const radius = this.roomRadius();
+    let px = THREE.MathUtils.clamp(x, -4.75 + radius, 4.75 - radius);
+    let pz = THREE.MathUtils.clamp(z, -3.45 + radius, 3.45 - radius);
+    for (const c of this.roomColliders) {
+      const qx = THREE.MathUtils.clamp(px, c.minX, c.maxX), qz = THREE.MathUtils.clamp(pz, c.minZ, c.maxZ);
+      const dx = px - qx, dz = pz - qz, d2 = dx * dx + dz * dz;
+      if (d2 >= radius * radius) continue;
+      const d = Math.sqrt(d2);
+      if (d > 1e-5) { px += dx / d * (radius - d); pz += dz / d * (radius - d); }
+      else {
+        const left = Math.abs(px - c.minX), right = Math.abs(c.maxX - px), top = Math.abs(pz - c.minZ), bottom = Math.abs(c.maxZ - pz);
+        const min = Math.min(left, right, top, bottom);
+        if (min === left) px = c.minX - radius; else if (min === right) px = c.maxX + radius;
+        else if (min === top) pz = c.minZ - radius; else pz = c.maxZ + radius;
+      }
+    }
+    return { x: THREE.MathUtils.clamp(px, -4.75 + radius, 4.75 - radius), z: THREE.MathUtils.clamp(pz, -3.45 + radius, 3.45 - radius) };
+  }
+
+  private roomRadius() { return Math.max(.28, Math.max(this.petFootprint.x, this.petFootprint.y) * this.petScale * .48); }
+
+  private roomPositionFree(x: number, z: number) {
+    const radius = this.roomRadius();
+    if (x < -4.75 + radius || x > 4.75 - radius || z < -3.45 + radius || z > 3.45 - radius) return false;
+    return this.roomColliders.every(c => {
+      const qx = THREE.MathUtils.clamp(x, c.minX, c.maxX), qz = THREE.MathUtils.clamp(z, c.minZ, c.maxZ);
+      return Math.hypot(x - qx, z - qz) >= radius;
+    });
+  }
+
+  /** Move in short steps, testing each axis independently so blocked motion slides along an obstacle. */
+  private sweepRoomPosition(fromX: number, fromZ: number, toX: number, toZ: number) {
+    let x = this.resolveRoomPosition(fromX, fromZ).x, z = this.resolveRoomPosition(fromX, fromZ).z;
+    const distance = Math.hypot(toX - x, toZ - z), steps = Math.max(1, Math.ceil(distance / .045));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps, wantedX = x + (toX - x) * t, wantedZ = z + (toZ - z) * t;
+      if (this.roomPositionFree(wantedX, z)) x = wantedX;
+      if (this.roomPositionFree(x, wantedZ)) z = wantedZ;
+    }
+    return { x, z };
   }
 
   /** Screen-space safety rails for the toy. At an edge, the velocity is reflected so
@@ -276,7 +333,15 @@ export class Engine implements PetEngine {
     this.beh?.pointTo(x, z);
   }
   /** Pick the pet up and carry it (finger drag); call with drop=true on release and it walks off the last bit and settles. */
-  carryPet(x: number, z: number, drop = false) { this.walkTo = drop ? { x, z } : undefined; this.beh?.dragTo(x, z, drop); }
+  carryPet(x: number, z: number, drop = false) {
+    const beh = this.beh;
+    if (!beh || this.view !== 'room') { this.walkTo = drop ? { x, z } : undefined; beh?.dragTo(x, z, drop); return; }
+    const from = beh.snapshot();
+    const safe = this.sweepRoomPosition(from.x, from.z, x, z);
+    const px = safe.x, pz = safe.z;
+    this.walkTo = drop ? { x: px, z: pz } : undefined;
+    beh.dragTo(px, pz, drop);
+  }
   /** True while the pet is on its way to a placePet target. */
   get travelling() {
     const w = this.walkTo, p = this.beh;
@@ -319,7 +384,7 @@ export class Engine implements PetEngine {
       // pet off the main canvas == edge-peek on (and vice versa)
       setVisible: v => { if (this.splat) this.splat.mesh.visible = v; this.peek?.setActive(!v); },
       emit: e => this.bus.emit(e),
-      burst: (k, x, y) => this.props?.burst(k, new THREE.Vector3(x, y, 0.1)),
+      burst: (k, x, y, z = 0.1, n = 10) => this.props?.burst(k, new THREE.Vector3(x, y, z), n),
       setCarry: p => this.props?.setCarry(p),
       setWorldProp: (p, x, y) => this.props?.setWorld(p, x === undefined ? undefined : new THREE.Vector3(x, y ?? 0, 0.2)),
       peek: e => this.peekEvents.push(e), // TODO 1.9: render in the edge-peek canvas
@@ -344,6 +409,7 @@ export class Engine implements PetEngine {
       releaseBall: (vx: number, vy: number) => { this.toys?.release(vx, vy); this.beh?.fetchBall(); },
       point: (x: number, z?: number) => this.beh?.pointTo(x, this.view === 'room' || this.view === 'camera' ? z : undefined),
       dragPet: (x: number, z: number, drop: boolean) => this.beh?.dragTo(x, z, drop),
+      petPosition: () => { const p = this.beh?.snapshot(); return { x: p?.x ?? 0, z: p?.z ?? 0 }; },
       cursor: (x: number, y: number) => { this.cursorAt = { x, y, t: performance.now() }; this.beh?.setCursor(x, y); },
       approval: () => ({ pending: this.approvalPending, actionId: this.approvalActionId }),
       setRing: (p: number) => this.setRing(p),
@@ -508,6 +574,7 @@ export class Engine implements PetEngine {
   setOverlayScene(scene: THREE.Scene | null) { if (this.overlay) this.scene.remove(this.overlay); this.overlay = scene ?? undefined; if (this.overlay) { this.overlay.renderOrder = -10; this.scene.add(this.overlay); } }
   setGroundPlane(y: number) { this.groundPlane = y; }
   setFurnitureSpots(spots: FurnitureSpot[]) { this.furnitureSpots = spots; }
+  setRoomColliders(colliders: RoomCollider[]) { this.roomColliders = colliders; }
   setSplatDepthTest(on: boolean) { this.splat?.setDepthTest(on); }
   claimGesture(pointerId: number) { if (this.claimedGestures.has(pointerId)) return false; this.claimedGestures.add(pointerId); return true; }
   releaseGesture(pointerId: number) { this.claimedGestures.delete(pointerId); }
