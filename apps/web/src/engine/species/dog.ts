@@ -49,7 +49,23 @@ export const quadClips: Record<string, Clip> = {
   flop: clip(3, true, (p, t) => { const e = ease(t, 0.4); return P({ ...lieDown(e), root: [breathe(p) * 2, 0, 0], head: [0.2 * e, 0, 0] }, -0.3 * e); }),
   // End at the same upright orientation as stand. Returning 2π here makes the
   // Animator's fade interpolate backward through a second roll after the clip.
-  roll: clip(1.4, false, p => { const e = Math.sin(Math.min(1, p) * Math.PI); const turn = p >= 1 ? 0 : p * TAU; return P({ root: [0, 0, turn], legFL: [-0.5, 0, 0], legFR: [-0.5, 0, 0], legBL: [0.5, 0, 0], legBR: [0.5, 0, 0] }, -0.28 * e); }),
+  // Drop to the floor, tip over the back with the body staying at ground height (root pivots at spine height, so
+  // the old turn-in-place at standing height floated), paddle the legs while upside down, then push back up.
+  roll: clip(2, false, p => {
+    const down = ease(p, 0.2), up = 1 - ease(Math.max(0, p - 0.85), 0.15);
+    const low = Math.min(down, up);                      // 0 standing .. 1 on the ground
+    const q = Math.min(1, Math.max(0, (p - 0.2) / 0.65)); // progress through the turn
+    const r = q * q * (3 - 2 * q);
+    const turn = q >= 1 ? 0 : r * TAU;                   // 2π ≡ 0: end exactly like stand so the next fade can't unroll
+    const back = Math.sin(turn / 2);                     // 1 when upside down
+    const kick = sw(p * 4, 0.3 * back);
+    return P({
+      root: [0, 0, turn],
+      legFL: [-0.9 * low - kick, 0, 0.3 * low], legFR: [-0.9 * low + kick, 0, -0.3 * low],
+      legBL: [0.7 * low + kick, 0, 0.3 * low], legBR: [0.7 * low - kick, 0, -0.3 * low],
+      head: [0.25 * low, 0, 0], tail: [0, wag(p, 2, 0.4 * (1 - low)), 0],
+    }, -0.27 * low);
+  }),
   playDead: clip(2, true, (_p, t) => { const e = ease(t, 0.4); return P({ root: [0, 0, 1.45 * e], legFL: [-0.7 * e, 0, 0], legFR: [-0.7 * e, 0, 0], legBL: [0.7 * e, 0, 0], legBR: [0.7 * e, 0, 0], head: [0.3 * e, 0, 0] }, -0.3 * e); }),
   shake: clip(1, true, (p, t) => sitPose(t, { legFL: [-1.0 + sw(p * 3, 0.3), 0, 0], tail: [0, sw(p, 0.4), 0] })),
   beg: clip(1.2, true, (p, t) => sitPose(t, { legFL: [-1.4 + sw(p * 2, 0.2), 0, 0], legFR: [-1.4 - sw(p * 2, 0.2), 0, 0], head: [0.1, 0, sw(p, 0.2)] })),
