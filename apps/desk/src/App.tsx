@@ -9,7 +9,9 @@ import { DeskEngine } from './engine/deskEngine'
 import { CreatePetFlow } from './create/CreatePetFlow'
 import { PetSwitcher, ServerPill } from './pets/PetSwitcher'
 import { usePetSync } from './pets/usePetSync'
-import { getSpeechRecognition, speakWithBrowserTts, unlockMicrophone } from './voice'
+import { unlockMicrophone } from './voice'
+import { ScribeListener } from '@fetch/web/src/voice/scribe'
+import { speak as speakInPetVoice } from '@fetch/web/src/voice/tts'
 import { FetchApiClient, type ApprovalState, type NotificationItem, type RunState, type SettingsState } from './api'
 import { useFetchStore } from './store'
 
@@ -43,7 +45,7 @@ function App() {
   const engine = useMemo(() => new DeskEngine(), [])
   const mainCanvas = useRef<HTMLCanvasElement>(null)
   const peekCanvas = useRef<HTMLCanvasElement>(null)
-  const recognition = useRef<ReturnType<typeof getSpeechRecognition>>(null)
+  const scribe = useRef<ScribeListener | null>(null) // speech-to-text: ElevenLabs Scribe, streamed while Space (or the mic button) is held
   usePlatforms(engine, mainCanvas)
   useRipples(root, calm)
   useDialogFocus(appState.approvals[0]?.actionId || (showCreate ? 'create' : showRunLog ? 'log' : showNotifications ? 'notifications' : showSettings ? 'settings' : showHelp ? 'help' : ''))
@@ -98,7 +100,9 @@ function App() {
     if (!appState.settings.voiceEnabled) return
     stopListening()
     setSpeaking(true)
-    speakWithBrowserTts(text, (amplitude) => engine.setSpeaking(amplitude), () => setSpeaking(false), appState.settings.volume / 100)
+    // the pet's own ElevenLabs voice (its voiceId, else the species default); the engine lip-syncs to the loudness
+    speakInPetVoice(text, { species: pet?.species ?? 'dog', voiceId: pet?.voiceId, volume: appState.settings.volume / 100, onAmplitude: (amplitude) => engine.setSpeaking(amplitude), onDone: () => setSpeaking(false) })
+      .catch((err) => { console.warn('pet voice unavailable', err); engine.setSpeaking(0); setSpeaking(false) })
   }
 
   const handleCommand = (text: string) => {
@@ -145,16 +149,22 @@ function App() {
   }
 
   const startListening = () => {
-    if (speaking) return
-    if (!recognition.current) recognition.current = getSpeechRecognition()
-    if (!recognition.current) { setToast('Voice input needs Chrome \u2014 use the command bar instead'); return }
-    recognition.current.onresult = (event) => { const transcript = event.results[0][0].transcript; setCommand(transcript); handleCommand(transcript) }
-    recognition.current.onend = () => setListening(false)
-    recognition.current.onerror = () => { setListening(false); setToast('I couldn\u2019t catch that \u2014 try again or type it') }
-    try { recognition.current.start(); setListening(true) } catch { setListening(false) }
+    if (speaking || listening) return
+    scribe.current ??= new ScribeListener()
+    setListening(true)
+    void scribe.current.start({
+      onFinal: (transcript) => { setListening(false); if (transcript) { setCommand(transcript); handleCommand(transcript) } else setToast('I couldn\u2019t catch that \u2014 try again or type it') },
+      onError: (code) => {
+        setListening(false)
+        setToast(code === 'not-allowed' ? 'Microphone access is blocked \u2014 allow it in the browser, or type instead'
+          : code === 'audio-capture' ? 'No microphone found \u2014 use the command bar instead'
+          : 'Voice is unavailable (ElevenLabs) \u2014 use the command bar instead')
+      },
+    })
   }
 
-  const stopListening = () => { recognition.current?.stop(); setListening(false) }
+  // releasing asks for the final words; they arrive through onFinal above
+  const stopListening = () => { scribe.current?.stop() }
 
   const sendCommand = () => {
     const trimmed = command.trim()

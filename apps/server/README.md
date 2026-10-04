@@ -60,7 +60,7 @@ Protected routes require B1's session cookie, or explicit development stub auth.
 | `POST /voice/tts` | `{text,voiceId?,species?}` | streamed MP3; species defaults to dog if omitted |
 | `POST /voice/sfx` | `{prompt}` | `{audioUrl}` |
 | `POST /voice/sfx/batch` | `{prompts:[...]}` (max 8) | `{items:[{prompt,audioUrl}]}` |
-| `GET /voice/stt-token` | — | `{token,expiresIn:900}`; mock returns `503 stt_unavailable` so F2 uses browser STT/text |
+| `GET /voice/stt-token` | — | `{token,expiresIn:900}`, single use, one per mic turn (30 a minute). Mock or no key returns `503`: the clients have no other recognizer, so the mic reports that voice is unavailable |
 
 Species: `dog,cat,rodent,bird`. Metadata requires `name,species`; optional personality/stat values receive species defaults. Stats 0–100, personality 0–1. Voice IDs must have been designed for the current user or be configured species defaults. Save the design result with pet creation metadata or `PATCH /pets/:id`.
 

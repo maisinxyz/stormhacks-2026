@@ -13,6 +13,8 @@ import { FirstPerson } from './fps';
 import { ITEMS, RoomHud, type ItemId } from './hud';
 import { ROOM_SPOTS } from './spots';
 import { Toys3D } from './toys3d';
+import { sayLine, SPOKEN, type LineId } from '../../voice/lines';
+import { hush } from '../../voice/tts';
 
 const PET_SCALE = 0.65;       // a little bigger than the old orbit view: the player now stands next to it
 const NOTICE = 3.2;           // metres: closer than this, the pet looks at the player
@@ -41,7 +43,7 @@ export class RoomView implements PlayView {
     e.setSplatDepthTest(true); e.setFurnitureSpots(ROOM_SPOTS);
     e.applyPetState(ctx.session.position ? { ...ctx.session.position, heading: ctx.session.heading } : { x: 0, z: 0 });
     this.toys = new Toys3D(e, room.scene, room.colliders, () => this.fps!.position);
-    this.toys.onFetched = () => this.hud?.counts(++this.fetches, this.tricks);
+    this.toys.onFetched = () => { this.hud?.counts(++this.fetches, this.tricks); this.voiceLine('fetched'); };
     this.toys.onThrow = kind => whoosh(kind === 'frisbee');
     this.toys.onBounce = speed => thump(speed);
     this.fps.onPrimary = down => this.primary(down);
@@ -81,6 +83,7 @@ export class RoomView implements PlayView {
     window.removeEventListener('keydown', this.onKey);
     const state = ctx.engine.getPetState();
     ctx.session.position = { x: state.x, z: state.z }; ctx.session.heading = state.heading;
+    hush(); ctx.engine.setSpeaking(0);
     ctx.engine.setLookAt(null); ctx.engine.setListening(false); ctx.engine.setPointerInteractions(true);
     ctx.engine.setFurnitureSpots([]); ctx.engine.setRoomColliders([]); ctx.engine.setOverlayScene(null);
     this.following = false;
@@ -114,9 +117,12 @@ export class RoomView implements PlayView {
     ctx.root.appendChild(hud.el);
     hud.owner(ctx.session.bundle.name); hud.item(this.item); hud.counts(this.fetches, this.tricks);
     this.coach(touch);
+    // the pet greets the player the first time they take the controls (audio needs that click anyway)
+    let greeted = false;
+    fps.onLock = locked => { if (locked && !greeted) { greeted = true; this.voiceLine('greeting'); } };
 
     this.talk = new Talk({
-      toast: (t, ms) => hud.toast(t, ms), setVoice: s => hud.setVoice(s), micLevel: v => hud.micLevel(v),
+      toast: (t, ms) => hud.toast(t, ms), setVoice: s => { hud.setVoice(s); if (s === 'listening') hush(); /* the pet stops talking so the mic does not hear it */ }, micLevel: v => hud.micLevel(v),
       listening: on => ctx.engine.setListening(on),
       run: id => this.run(id), love: () => this.love(),
     });
@@ -167,11 +173,11 @@ export class RoomView implements PlayView {
       if (aim !== 'pet') { this.hud?.toast(`Get closer to ${name} and look at it to feed it.`, 2500); this.comeAndBeg(); return; }
       this.following = false; toys.cancel();
       e.faceToward(eye.x, eye.z);
-      if (e.feed()) { e.flourish('heart'); this.hud?.toast(`${name} loved that.`, 1800); crunch(); }
+      if (e.feed()) { e.flourish('heart'); this.hud?.toast(`${name} loved that.`, 1800); crunch(); window.setTimeout(() => this.voiceLine('fed'), 600); }
       else this.hud?.toast(`${name} does not eat that.`, 1800);
     } else if (aim === 'pet') { // empty hand on the pet: a stroke
       this.following = false; toys.cancel();
-      e.petted();
+      e.petted(); this.voiceLine('stroked');
       e.perform([face, hearts, { clip: 'wag', secs: 1.6 }, hearts]);
     } else if (aim) this.send(aim);
   }
@@ -203,7 +209,7 @@ export class RoomView implements PlayView {
     const e = this.ctx!.engine, p = e.petPosition, eye = this.fps!.position;
     const S = ROOM_SPEC[what], half = what === 'hoop' ? 1.0 : ROOM_SPEC.tunnel.length / 2 + 0.55, side = p.x < S.x ? -1 : 1;
     this.following = false; this.toys?.cancel();
-    const done = [{ call: () => { e.played(); this.hud?.counts(this.fetches, ++this.tricks); e.flourish('sparkle'); e.faceToward(eye.x, eye.z); } }, { clip: 'wag', secs: 1.4 }];
+    const done = [{ call: () => { e.played(); this.hud?.counts(this.fetches, ++this.tricks); e.flourish('sparkle'); e.faceToward(eye.x, eye.z); this.voiceLine('trick'); } }, { clip: 'wag', secs: 1.4 }];
     if (what === 'tunnel') { // the tunnel is solid to the pet except while it is sent through
       e.setRoomColliders(this.room!.colliders.filter(c => c !== this.room!.tunnelCollider));
       this.tunnelOpenFor = 9;
@@ -228,14 +234,23 @@ export class RoomView implements PlayView {
     this.following = id === 'follow';
     this.toys?.cancel(); // a command interrupts a fetch: the toy goes back to the hand
     this.hud?.counts(this.fetches, ++this.tricks);
+    const spoken = SPOKEN[id];
+    if (spoken) this.voiceLine(spoken);
     if (id === 'follow') { this.followT = 0; this.hud?.toast('Following you. Say another command to stop.', 2500); return; }
     e.perform(commandSteps(id, { engine: e, eye: fps.position, forward: fps.forward(), reach: [0.8, 12], hold: HOLD_SECS, woof: () => this.woof() }));
   }
   private love() {
     const e = this.ctx!.engine, eye = this.fps!.position;
     this.following = false; this.toys?.cancel();
+    this.voiceLine('unknown');
     e.perform([{ call: () => e.faceToward(eye.x, eye.z) }, { call: () => e.flourish('heart') }, { clip: 'wag', secs: 2 }]);
   }
+  /** The pet says a line in its own voice (ElevenLabs), head bobbing with the sound. */
+  private voiceLine(id: LineId) {
+    const ctx = this.ctx;
+    if (ctx) sayLine(id, ctx.session.bundle, a => ctx.engine.setSpeaking(a), () => this.hud?.toast('The pet\'s voice is unavailable (ElevenLabs).', 4000));
+  }
+
   private woof() {
     bark();
     const e = this.ctx!.engine, p = e.petPosition;

@@ -8,7 +8,8 @@ const SLOW_MS = 4000, LATE_MS = 8000; // no command within 4 s -> wag + hearts; 
 const VOICE_ERRORS: Record<string, string> = {
   'not-allowed': 'Microphone access is blocked. Allow it in the browser to talk to your pet.',
   'audio-capture': 'No microphone found.',
-  'model-unavailable': 'The voice model could not be downloaded (needs internet once).',
+  'unavailable': 'Voice is unavailable: the server has no working ElevenLabs key (or it is out of credits).',
+  'network': 'Lost the connection to the speech service. Try again.',
 };
 
 export interface TalkHost {
@@ -26,8 +27,10 @@ export class Talk {
   readonly voice: PushToTalk;
   private slowTimer = 0; private levelTimer = 0; private interpretingSince = 0;
 
-  constructor(private h: TalkHost) {
-    this.voice = new PushToTalk(t => this.heard(t), code => this.failed(code), text => h.toast(text, 4000), s => this.state(s));
+  /** `extra`: more words the recognizer should favour on top of the commands (not the pet's name, see voice.ts). */
+  constructor(private h: TalkHost, extra: string[] = []) {
+    this.voice = new PushToTalk(t => this.heard(t), code => this.failed(code), text => h.toast(text, 4000), s => this.state(s), extra);
+    this.voice.warm();
   }
   toggle() { this.voice.toggle(); }
 
@@ -51,7 +54,7 @@ export class Talk {
   private failed(code: string) {
     window.clearTimeout(this.slowTimer);
     if (VOICE_ERRORS[code]) this.h.toast(VOICE_ERRORS[code], 6000);
-    this.h.love();
+    if (code === 'no-speech') this.h.love(); // nothing was said: still a happy pet. A broken mic or service only shows the message.
   }
   dispose() { window.clearTimeout(this.slowTimer); window.clearInterval(this.levelTimer); this.voice.release(); }
 }

@@ -161,7 +161,8 @@ export async function registerMediaRoutes(app: FastifyInstance, ctx: ServerConte
       // Sequential avoids a burst of eight provider calls during onboarding.
       const items = []; for (const prompt of b.prompts) items.push({ prompt, ...await media.sfx(user(req), prompt) }); return { items };
     });
-    scoped.get('/voice/stt-token', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async () => media.sttToken());
+    // one single-use token per mic turn (the client keeps one ready), so allow a turn every 2 s
+    scoped.get('/voice/stt-token', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async () => media.sttToken());
     scoped.delete('/pets', async (req, reply) => {
       const uid = user(req);
       await ctx.deleteUserMedia(uid);

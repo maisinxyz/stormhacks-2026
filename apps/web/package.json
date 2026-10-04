@@ -13,7 +13,6 @@
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
     "@fetch/contracts": "workspace:*",
-    "@huggingface/transformers": "^4.3.0",
     "three": "^0.170.0"
   },
   "devDependencies": {

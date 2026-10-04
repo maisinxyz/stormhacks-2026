@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { interpret, type CommandId } from '../commands';
 import { bark } from '../sfx';
 import { commandSteps } from '../tricks';
+import { sayLine, SPOKEN, type LineId } from '../../voice/lines';
+import { hush } from '../../voice/tts';
 import { PushToTalk } from '../voice';
 import type { OrientationStatus } from './pose';
 import type { LocalIntent } from '@fetch/contracts';
@@ -27,7 +29,8 @@ const TAP_PX = 8, TAP_MS = 350, HOLD_MS = 600;
 const VOICE_ERRORS: Record<string, string> = {
   'not-allowed': 'Microphone access is blocked. Allow it in the browser to talk to your dog.',
   'audio-capture': 'No microphone found.',
-  'model-unavailable': 'The voice model could not be downloaded (needs internet once).',
+  'unavailable': 'Voice is unavailable: the server has no working ElevenLabs key (or it is out of credits).',
+  'network': 'Lost the connection to the speech service. Try again.',
 };
 const SLOW_MS = 4000, LATE_MS = 8000; // no command within 4 s -> wag + hearts; an answer later than 8 s is dropped
 const LOOK_AROUND = new URLSearchParams(location.search).get('orient') === 'mouse';
@@ -258,6 +261,7 @@ export class CameraView implements PlayView {
   /** The dog listens (head up, ears perked) from the moment the mic opens until it has a command, and the UI shows the stage. */
   private voiceState(s: 'idle' | 'listening' | 'interpreting') {
     this.ui.setVoice(s);
+    if (s === 'listening') hush(); // the pet stops talking so the mic does not hear it
     this.ctx.engine.setListening(s !== 'idle');
     if (s !== 'idle') this.alive.focus(10);
     window.clearInterval(this.levelTimer);
@@ -274,7 +278,7 @@ export class CameraView implements PlayView {
   private voiceFailed(code: string) {
     window.clearTimeout(this.slowTimer);
     if (VOICE_ERRORS[code]) this.ui.toast(VOICE_ERRORS[code], 6000);
-    this.love();
+    if (code === 'no-speech') this.love(); // nothing was said: still a happy pet. A broken mic or service only shows the message.
   }
   private levelTimer = 0;
 
@@ -307,7 +311,14 @@ export class CameraView implements PlayView {
     const e = this.ctx.engine;
     this.following = false;
     this.alive.focus(2.5);
+    this.say('unknown');
     e.perform([{ call: () => e.faceToward(e.camera.position.x, e.camera.position.z) }, { call: () => e.flourish('heart') }, { clip: 'wag', secs: 2 }]);
+  }
+
+  /** The pet says a line in its own voice (ElevenLabs), head bobbing with the sound. */
+  private say(id: LineId) {
+    const e = this.ctx.engine;
+    sayLine(id, this.ctx.session.bundle, a => e.setSpeaking(a), () => this.ui.toast('The pet\'s voice is unavailable (ElevenLabs).', 4000));
   }
 
   private woof() {
@@ -323,6 +334,8 @@ export class CameraView implements PlayView {
     const e = this.ctx.engine;
     this.following = false;
     this.alive.focus(3);
+    const spoken = SPOKEN[id];
+    if (spoken) this.say(spoken);
     if (id === 'follow') this.follow();
     else e.perform(commandSteps(id, { engine: e, eye: e.camera.position, forward: e.camera.getWorldDirection(new THREE.Vector3()), reach: [PLACE_MIN, PLACE_MAX], hold: true, woof: () => this.woof() }));
   }

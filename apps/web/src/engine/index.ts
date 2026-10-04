@@ -288,9 +288,11 @@ export class Engine implements PetEngine {
     }
     const k = Math.min(1, dt * 6);
     L.yaw += (ty - L.yaw) * k; L.pitch += (tp - L.pitch) * k;
-    if (!head || (Math.abs(L.yaw) < 1e-3 && Math.abs(L.pitch) < 1e-3)) return;
+    this.speakNow += (this.speakAmp - this.speakNow) * Math.min(1, dt * 22); // fast, so syllables read
+    const talk = this.speakNow * 0.3; // radians of nose-up at full loudness
+    if (!head || (Math.abs(L.yaw) < 1e-3 && Math.abs(L.pitch) < 1e-3 && talk < 1e-3)) return;
     const e = headPose ?? [0, 0, 0];
-    this.setBoneEuler('head', e[0] + L.pitch, e[1] + L.yaw, e[2]);
+    this.setBoneEuler('head', e[0] + L.pitch - talk, e[1] + L.yaw, e[2]);
   }
 
   /** Splat colour multiplier (ambient match, play.md B.8). (1,1,1) = off. */
@@ -615,7 +617,9 @@ export class Engine implements PetEngine {
     }
     this.beh?.doIntent(i);
   }
-  setSpeaking(_amplitude: number) { /* TODO */ }
+  /** 0..1 loudness of the pet's voice right now: the head bobs with it (lip-sync for a pet with no jaw). */
+  setSpeaking(amplitude: number) { this.speakAmp = Math.max(0, Math.min(1, amplitude)); }
+  private speakAmp = 0; private speakNow = 0;
   generatePet(input: { kind: 'photo' | 'drawing'; image: Blob; species: Species; name: string },
               onProgress: (p: { stage: string; pct: number }) => void): Promise<PetBundle> {
     return runPipeline(this.opts.apiBase ?? '', input, onProgress, BUDGET[this.quality]);
