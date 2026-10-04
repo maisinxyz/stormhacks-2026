@@ -30,19 +30,24 @@ export async function unlockMicrophone(): Promise<boolean> {
   } catch { return false }
 }
 
-export function speakWithBrowserTts(text: string, onAmplitude: (value: number) => void, onDone: () => void) {
+export function speakWithBrowserTts(text: string, onAmplitude: (value: number) => void, onDone: () => void, volume = 1) {
   if (!('speechSynthesis' in window)) { onDone(); return }
-  window.speechSynthesis.cancel()
+  const synthesis = window.speechSynthesis
+  synthesis.cancel()
   const utterance = new SpeechSynthesisUtterance(text)
-  let frame = 0
+  utterance.volume = Math.max(0, Math.min(1, volume))
+  let frame = 0, finished = false
+  const finish = () => { if (finished) return; finished = true; onAmplitude(0); onDone() }
   const pulse = () => {
+    if (finished) return
     onAmplitude(.18 + Math.abs(Math.sin(frame / 3)) * .62)
     frame += 1
-    if (window.speechSynthesis.speaking) requestAnimationFrame(pulse)
-    else { onAmplitude(0); onDone() }
+    if (synthesis.speaking) requestAnimationFrame(pulse)
+    else finish()
   }
   utterance.onstart = () => requestAnimationFrame(pulse)
-  utterance.onend = () => { onAmplitude(0); onDone() }
-  utterance.onerror = () => { onAmplitude(0); onDone() }
-  window.speechSynthesis.speak(utterance)
+  utterance.onend = finish
+  utterance.onerror = finish
+  synthesis.speak(utterance)
+  synthesis.resume()
 }
