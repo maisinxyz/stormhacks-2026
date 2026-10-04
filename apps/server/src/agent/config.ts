@@ -4,6 +4,7 @@ const flag = (v: string | undefined) => v === '1' || v === 'true';
 export interface B1Config {
   mockAgent: boolean;
   mockConnectors: boolean;
+  modelProvider: 'anthropic' | 'gemini';
   /** When false, requests without a session cookie act as the shared demo user. */
   requireLogin: boolean;
   demoUserId: string;
@@ -12,6 +13,7 @@ export interface B1Config {
   google: { clientId?: string; clientSecret?: string; redirectUri: string };
   webOrigin: string;            // where /auth/google/callback redirects back to
   composio: { apiKey?: string; callbackUrl: string };
+  gemini: { apiKey?: string };
   agentModel: string;
   toolTimeoutMs: number;
   maxSteps: number;
@@ -25,6 +27,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): B1Config {
   return {
     mockAgent: flag(env.MOCK_AGENT),
     mockConnectors: flag(env.MOCK_CONNECTORS),
+    modelProvider: env.MODEL_PROVIDER === 'anthropic' ? 'anthropic' : 'gemini',
     requireLogin: flag(env.REQUIRE_LOGIN),
     demoUserId: env.DEMO_USER_ID ?? 'demo-user',
     sessionSecret: env.SESSION_SECRET ?? DEV_SECRET,
@@ -40,7 +43,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): B1Config {
       // Where the browser lands after finishing an app's sign-in.
       callbackUrl: env.COMPOSIO_CALLBACK_URL ?? `${env.WEB_ORIGIN ?? 'http://localhost:5173'}/?connected=app`,
     },
-    agentModel: env.AGENT_MODEL ?? 'claude-opus-5-5',
+    gemini: { apiKey: env.GEMINI_API_KEY || undefined },
+    agentModel: env.AGENT_MODEL ?? (env.MODEL_PROVIDER === 'anthropic' ? 'claude-opus-5-5' : 'gemini-2.5-flash'),
     toolTimeoutMs: Number(env.TOOL_TIMEOUT_MS ?? 30_000),
     maxSteps: Number(env.AGENT_MAX_STEPS ?? 15),
     approvalTtlMs: Number(env.APPROVAL_TTL_MS ?? 10 * 60_000),

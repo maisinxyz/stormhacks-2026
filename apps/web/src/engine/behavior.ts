@@ -284,6 +284,7 @@ export class Behavior {
   }
 
   private *intent(name: string, id: string, hold: boolean): Routine {
+    if (name === 'roll') this.targetY = 0;
     this.playClip(name);
     const c = this.pack.clips[name];
     if (hold && !this.autonomous) { yield () => false; return; } // sit/stay: held until the next command starts a routine

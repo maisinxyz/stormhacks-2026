@@ -47,9 +47,18 @@ export const quadClips: Record<string, Clip> = {
   startle: clip(0.9, false, p => { const k = Math.sin(Math.min(1, p * 3) * Math.PI); return P({ root: [-0.2 * k, 0, 0], legFL: [-0.5 * k, 0, 0], legFR: [-0.5 * k, 0, 0], tail: [-0.6 * k, 0, 0] }, 0.18 * k); }),
   spin: clip(1, false, p => P({ legFL: [sw(p * 3, 0.5), 0, 0], legBR: [sw(p * 3, 0.5), 0, 0], legFR: [-sw(p * 3, 0.5), 0, 0], legBL: [-sw(p * 3, 0.5), 0, 0], tail: [-0.2, wag(p, 4, 0.5), 0] }, 0, p * TAU)),
   flop: clip(3, true, (p, t) => { const e = ease(t, 0.4); return P({ ...lieDown(e), root: [breathe(p) * 2, 0, 0], head: [0.2 * e, 0, 0] }, -0.3 * e); }),
-  // End at the same upright orientation as stand. Returning 2π here makes the
-  // Animator's fade interpolate backward through a second roll after the clip.
-  roll: clip(1.4, false, p => { const e = Math.sin(Math.min(1, p) * Math.PI); const turn = p >= 1 ? 0 : p * TAU; return P({ root: [0, 0, turn], legFL: [-0.5, 0, 0], legFR: [-0.5, 0, 0], legBL: [0.5, 0, 0], legBR: [0.5, 0, 0] }, -0.28 * e); }),
+  // Grounded roll: tuck the paws, rotate around the dog's long spine, and keep
+  // the authored body height at zero so the floor-compensation code cannot lift
+  // the dog into the air. The final frame returns to upright without reverse spin.
+  roll: clip(1.55, false, p => {
+    const t = Math.min(1, p), tuck = Math.sin(t * Math.PI), turn = t >= 1 ? 0 : t * TAU;
+    return P({
+      root: [0.08 * tuck, 0, turn],
+      legFL: [-0.42 - 0.22 * tuck, 0, 0.18 * tuck], legFR: [-0.42 - 0.22 * tuck, 0, -0.18 * tuck],
+      legBL: [0.42 + 0.18 * tuck, 0, 0.16 * tuck], legBR: [0.42 + 0.18 * tuck, 0, -0.16 * tuck],
+      head: [0.18 * tuck, 0, 0], tail: [-0.18 * tuck, 0, 0],
+    }, 0);
+  }),
   playDead: clip(2, true, (_p, t) => { const e = ease(t, 0.4); return P({ root: [0, 0, 1.45 * e], legFL: [-0.7 * e, 0, 0], legFR: [-0.7 * e, 0, 0], legBL: [0.7 * e, 0, 0], legBR: [0.7 * e, 0, 0], head: [0.3 * e, 0, 0] }, -0.3 * e); }),
   shake: clip(1, true, (p, t) => sitPose(t, { legFL: [-1.0 + sw(p * 3, 0.3), 0, 0], tail: [0, sw(p, 0.4), 0] })),
   beg: clip(1.2, true, (p, t) => sitPose(t, { legFL: [-1.4 + sw(p * 2, 0.2), 0, 0], legFR: [-1.4 - sw(p * 2, 0.2), 0, 0], head: [0.1, 0, sw(p, 0.2)] })),
