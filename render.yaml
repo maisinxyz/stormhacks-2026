@@ -21,7 +21,8 @@ services:
       - { key: MOCK_GEN, value: "0" }
       - { key: MOCK_VOICE, value: "0" }
       - { key: MOCK_AGENT, value: "0" }
-      - { key: MOCK_CONNECTORS, value: "1" }    # the offline demo workspace: no real inboxes behind a shared demo user
+      - { key: MOCK_CONNECTORS, value: "0" }    # real apps through Composio. Shared demo mode has ONE user, so whoever connects an account shares it with everyone who has the link
+      - { key: COMPOSIO_API_KEY, sync: false }
       - { key: MODEL_PROVIDER, value: gemini }
       - { key: PUBLIC_URL, sync: false }         # the Vercel site, e.g. https://fetch-pets.vercel.app (asset links go through its rewrites)
       - { key: WEB_ORIGIN, sync: false }
