@@ -19,6 +19,8 @@ export interface PlushTraits {
   tailLength: number;  // 0.08 (stub) .. 0.5
   tailUp: number;      // 0 = hangs back .. 1 = carried up
   colors: { base: string; belly: string; ear: string; muzzle: string; paws: string; tailTip: string; nose: string; eye: string };
+  size?: number;      // overall size next to the default dog (1). 1.25 = a quarter taller, longer and wider
+  saddle?: string;     // optional darker blanket over the back and the top of the tail (e.g. a German shepherd's black saddle)
 }
 
 export const DEFAULT_PLUSH: PlushTraits = {
@@ -49,6 +51,10 @@ export function plushDog(t: PlushTraits) {
     { bone: 'head', c: snoutC, r: snoutR, kind: 0, color: C.muzzle, seam: 2 },
     { bone: 'head', c: [0, snoutC[1] + snoutR[1] * 0.45, snoutC[2] + snoutR[2] * 0.85], r: [h * 0.2, h * 0.15, h * 0.13], kind: 2, color: C.nose, seam: 0 },
   ];
+  if (t.saddle) { // lies just inside the back surface, so it only recolours the top and sides of the torso
+    prims.push({ bone: 'root', c: [0, by + g * 0.28, -L * 0.04], r: [g * 0.9, g * 0.7, L / 2 * 0.62], kind: 0, color: t.saddle, seam: 0 });
+    prims.push({ bone: 'root', c: [0, by + g * 0.3, -zf - g * 0.05], r: [g * 0.95, g * 0.72, g * 0.9], kind: 0, color: t.saddle, seam: 0 }); // over the rump
+  }
   for (const sx of [1, -1]) {
     prims.push({ bone: 'head', c: [sx * h * 0.44, head[1] + h * 0.16, head[2] + h * 0.78], r: [h * 0.185, h * 0.185, h * 0.185], kind: 1, color: C.eye, seam: 0 });
     // ear: slides from a hanging flap on the side of the head (0) to an upright point on top (1)
@@ -80,12 +86,12 @@ export function plushDog(t: PlushTraits) {
     { name: 'legBR', parent: 0, head: [-lx, l + g * 0.1, -zf], tail: [-lx, 0, -zf] },
   ];
   // normalise: the tallest point becomes height 1 (the Engine scales a 1-unit pet to metres)
-  const k1 = 1 / Math.max(...prims.map(p => p.c[1] + p.r[1]));
+  const size = t.size ?? 1, k1 = size / Math.max(...prims.map(p => p.c[1] + p.r[1]));
   const sc = (v: V3): V3 => [v[0] * k1, v[1] * k1, v[2] * k1];
   for (const p of prims) { p.c = sc(p.c); p.r = sc(p.r); }
   bones = bones.map(b => ({ ...b, head: sc(b.head), tail: sc(b.tail) }));
   const ext = (i: number, sgn: number) => Math.max(...prims.map(p => sgn * p.c[i] + p.r[i]));
-  return { prims, bones, min: [-ext(0, -1), 0, -ext(2, -1)] as V3, max: [ext(0, 1), 1, ext(2, 1)] as V3 };
+  return { prims, bones, min: [-ext(0, -1), 0, -ext(2, -1)] as V3, max: [ext(0, 1), size, ext(2, 1)] as V3 };
 }
 
 const vert = /* glsl */ `
