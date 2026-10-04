@@ -61,7 +61,7 @@ export async function generatePet(api: string, input: GenInput, onProgress: Prog
     if (!splatUrl) throw new GenError('gen_timeout');
     p('rig', 0.72);
     const raw = parsePly(await (await fetch(splatUrl)).arrayBuffer());
-    const g = cleanupSplat(raw, { species: input.species, budget });
+    const g = cleanupSplat(raw, { species: input.species, budget, source: 'trellis' });
     if (g.n < 2000 || g.n < raw.n * 0.2) throw new GenError('gen_low_quality');
     return g;
   };

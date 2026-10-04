@@ -6,9 +6,10 @@ const breathe = (p: number) => sw(p, 0.015);
 const wag = (p: number, f = 1, a = 0.7) => sw(p * f, a);
 
 // Skeleton: root, head, tail, legFL/FR/BL/BR. Rotation about +x lowers forward (+z) points; leg x<0 swings forward.
+// Front legs counter-rotate most of the body pitch so they stay planted and vertical.
 const sitPose = (t: number, extra: Pose['bones'] = {}): Pose => {
   const e = ease(t);
-  return P({ root: [-0.55 * e, 0, 0], legBL: [1.25 * e, 0, 0], legBR: [1.25 * e, 0, 0], legFL: [0.1 * e, 0, 0], legFR: [0.1 * e, 0, 0], head: [0.55 * e, 0, 0], ...extra }, -0.17 * e);
+  return P({ root: [-0.55 * e, 0, 0], legBL: [1.25 * e, 0, 0], legBR: [1.25 * e, 0, 0], legFL: [0.45 * e, 0, 0], legFR: [0.45 * e, 0, 0], head: [0.55 * e, 0, 0], ...extra }, -0.17 * e);
 };
 const lieDown = (e: number): Pose['bones'] => ({ legFL: [-0.6 * e, 0, 0.5 * e], legFR: [-0.6 * e, 0, -0.5 * e], legBL: [0.6 * e, 0, 0.5 * e], legBR: [0.6 * e, 0, -0.5 * e] });
 

@@ -7,7 +7,8 @@
     "dev:phone": "vite --host --mode phone",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "gen:bundles": "node scripts/gen-test-bundles.mjs"
+    "gen:bundles": "node scripts/gen-test-bundles.mjs",
+    "bake": "tsx scripts/bake-ply.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
@@ -18,6 +19,7 @@
     "@types/three": "^0.170.0",
     "@types/webxr": "^0.5.24",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.0",
     "vite": "^6.0.0"
   }
