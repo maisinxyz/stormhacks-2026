@@ -36,11 +36,17 @@ export interface SettingsState {
   subtitles: boolean
   sketchyShader: boolean
   demoMode: boolean
+  theme: 'light' | 'dark'
 }
 
 export interface SessionState { userName: string; connected: { gmail: boolean; calendar: boolean; drive: boolean } }
 
-export const defaultSettings: SettingsState = { voiceEnabled: true, volume: 75, inputMode: 'ptt', quality: 'high', reduceMotion: false, subtitles: true, sketchyShader: false, demoMode: true }
+export const defaultSettings: SettingsState = { voiceEnabled: true, volume: 75, inputMode: 'ptt', quality: 'high', reduceMotion: false, subtitles: true, sketchyShader: false, demoMode: true, theme: 'light' }
+
+export function apiErrorCopy(code: string) {
+  const copies: Record<string, string> = { mode_forbidden: 'Connectors are off in Play mode.', auth_required: 'Connect an account to use work errands.', rate_limited: 'Fetch is busy. Try again in a moment.', gen_failed: 'Pet creation failed. Try again or use the fallback.' }
+  return copies[code] ?? 'Fetch could not complete that request.'
+}
 
 export class FetchApiClient {
   constructor(private readonly baseUrl = '') {}
