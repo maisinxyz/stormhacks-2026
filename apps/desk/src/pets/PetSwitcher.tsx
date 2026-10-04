@@ -4,7 +4,7 @@ import type { PetBundle } from '../contracts'
 import '../create/create.css'
 import type { PetSync, ServerStatus } from './usePetSync'
 
-const speciesLabel: Record<PetBundle['species'], string> = { dog: 'Dog', cat: 'Cat', rodent: 'Rodent', bird: 'Parrot' }
+const speciesLabel: Record<PetBundle['species'], string> = { dog: 'Dog', cat: 'Cat', rodent: 'Rodent', bird: 'Bird' }
 const glyph: Record<PetBundle['species'], string> = { dog: '◕ᴥ◕', cat: '◡ᴗ◡', rodent: '•ᴥ•', bird: '✦' }
 
 export function PetAvatar({ pet, size = 32 }: { pet: PetBundle | null; size?: number }) {
@@ -28,7 +28,7 @@ export function PetSwitcher({ pets, activePet, sync, onCreate }: { pets: PetBund
   return <div className="pet-switch">
     <button className="pet-switcher" onClick={() => (pets.length ? setOpen(!open) : onCreate())} aria-expanded={open} aria-haspopup="listbox">
       <PetAvatar pet={activePet} />
-      <span className="pet-switcher-copy"><strong>{activePet?.name ?? 'New pet'}</strong><small>{activePet ? `${speciesLabel[activePet.species]} · ${online ? 'online' : 'demo'}` : online ? 'Create your first pet' : 'Start the server to create pets'}</small></span>
+      <span className="pet-switcher-copy"><strong>{activePet?.name ?? 'No pet yet'}</strong><small>{activePet ? `${speciesLabel[activePet.species]} · ${online ? 'online' : 'demo'}` : online ? 'Create your first pet' : 'Start the server to create pets'}</small></span>
       <ChevronDown size={15} className={open ? 'chevron-open' : ''} />
     </button>
     {open && <ul className="pet-list" role="listbox" aria-label="Your pets">
@@ -48,6 +48,6 @@ export function PetSwitcher({ pets, activePet, sync, onCreate }: { pets: PetBund
 
 export function ServerPill({ status, mockGen }: { status: ServerStatus; mockGen: boolean }) {
   if (status === 'checking') return null
-  if (status === 'offline') return <span className="demo-pill" title="Run `pnpm dev` in apps/server to create and save pets"><span className="demo-dot" /> Demo mode · server offline</span>
+  if (status === 'offline') return <span className="demo-pill" title="Run `pnpm dev` in apps/server to create and save pets"><span className="demo-dot" /> Server offline · demo mode</span>
   return mockGen ? <span className="demo-pill" title="The server is running with MOCK_GEN=1"><span className="demo-dot" /> Mock 3D</span> : null
 }

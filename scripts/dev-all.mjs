@@ -3,8 +3,9 @@ import net from 'node:net'
 import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const pm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 const apps = [
+  { name: 'Server', port: 3001, cwd: resolve(root, 'apps/server') },
   { name: 'Play', port: 5174, cwd: resolve(root, 'apps/web') },
   { name: 'Desk', port: 5173, cwd: resolve(root, 'apps/desk') },
 ]
@@ -21,15 +22,21 @@ for (const app of apps) {
     console.log(`${app.name} is already running on http://localhost:${app.port}; reusing it.`)
     continue
   }
-  children.push(spawn(npm, ['run', 'dev'], { cwd: app.cwd, stdio: 'inherit', shell: process.platform === 'win32' })) // shell: Node 24 on Windows refuses to spawn .cmd directly (EINVAL)
+  children.push(spawn(pm, ['run', 'dev'], { cwd: app.cwd, stdio: 'inherit', shell: process.platform === 'win32' }))
 }
 
 let shuttingDown = false
 const shutdown = (code = 0) => {
   if (shuttingDown) return
   shuttingDown = true
-  for (const child of children) child.kill('SIGTERM')
-  setTimeout(() => process.exit(code), 100)
+  for (const child of children) {
+    if (process.platform === 'win32' && child.pid) {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'])
+    } else {
+      child.kill('SIGTERM')
+    }
+  }
+  setTimeout(() => process.exit(code), 200)
 }
 
 for (const child of children) child.on('exit', (code) => { if (!shuttingDown && code) shutdown(code) })

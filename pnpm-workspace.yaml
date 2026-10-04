@@ -5,3 +5,5 @@ allowBuilds:
   esbuild: true
   sharp: true
   electron: true
+  onnxruntime-node: true
+  protobufjs: true

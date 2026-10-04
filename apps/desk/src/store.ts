@@ -13,8 +13,8 @@ export interface FetchState {
   voice: { listening: boolean; speaking: boolean; micAvailable: boolean }
 }
 
-export function useFetchStore(initialPet: PetBundle) {
-  const [state, setState] = useState<FetchState>({ pets: [initialPet], activePetId: initialPet.id, mode: 'work', runs: [], approvals: [], notifications: [], settings: defaultSettings, voice: { listening: false, speaking: false, micAvailable: true } })
+export function useFetchStore() {
+  const [state, setState] = useState<FetchState>({ pets: [], activePetId: null, mode: 'work', runs: [], approvals: [], notifications: [], settings: defaultSettings, voice: { listening: false, speaking: false, micAvailable: true } })
   const setMode = useCallback((mode: Mode) => setState((current) => ({ ...current, mode })), [])
   const addPet = useCallback((pet: PetBundle) => setState((current) => ({ ...current, pets: [...current.pets, pet], activePetId: pet.id })), [])
   const setPets = useCallback((pets: PetBundle[], activePetId: string | null) => setState((current) => ({ ...current, pets, activePetId })), [])
