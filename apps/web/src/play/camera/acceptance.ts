@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import type { Mood } from '@fetch/contracts';
 import { MOODS } from '../../engine/anim';
 import type { PlayShell } from '../shell';
-import { parseCommand } from '../voice';
+import { interpret, SELF_CHECK } from '../commands';
 import { AR_PET_SCALE } from './camera';
 import { composite } from './capture';
 import { CAMERA_FOV } from './pose';
@@ -149,7 +149,7 @@ export async function run(shell: PlayShell) {
     cam.pose.recenter(); orient(55, 68); await sleep(600); cam.heard('follow me'); orient(115, 68); await sleep(600);
     await until(() => e.travelling, 2000); await until(() => !e.travelling, 9000);
     const followed = Math.abs(ndc().x) < 0.3;
-    cam.heard('stay there'); const pStay = pos(); orient(55, 68); await sleep(3000);
+    cam.heard('sit'); const pStay = pos(); orient(55, 68); await sleep(3000);
     const pNow = pos(); const stayed = Math.hypot(pNow.x - pStay.x, pNow.z - pStay.z) < 0.01 && !cam.following; // xz only: sitting lowers the body
     e.doIntent('stop'); cam.pose.recenter(); e.placePet(0, 0, false); await sleep(400);
     add('alive', 'B.13-6 never frozen; moves only on command; a pose holds until the next command',
@@ -159,23 +159,38 @@ export async function run(shell: PlayShell) {
     // side placement: clear of the user, faces the centre, swaps on command
     cam.pose.recenter(); orient(55, 68); await sleep(600); cam.side = 1; cam.placeSide(false); await sleep(500);
     const sideR = ndc().x, faceR = e.beh.dir;
-    cam.heard('other side'); await sleep(200); await until(() => !e.travelling, 9000); await sleep(400);
+    cam.side = -1; cam.placeSide(true); await sleep(200); await until(() => !e.travelling, 9000); await sleep(400);
     const sideL = ndc().x, faceL = e.beh.dir;
     cam.side = 1; try { sessionStorage.removeItem('fetch.play.side'); } catch { /* ignore */ }
     e.doIntent('stop'); e.placePet(0, 0, false); await sleep(300);
-    add('side', 'B.6 dog stands at the side of the shot, in frame, facing the centre; "other side" swaps',
+    add('side', 'B.6 dog stands at the side of the shot, in frame, facing the centre, on either side',
       sideR > 0.25 && sideR < 0.85 && faceR === -1 && sideL < -0.25 && sideL > -0.85 && faceL === 1,
-      `screen x ${sideR.toFixed(2)} on the right facing ${faceR === -1 ? 'left' : 'right'}; after "other side" x ${sideL.toFixed(2)} facing ${faceL === 1 ? 'right' : 'left'} (aspect ${(innerWidth / innerHeight).toFixed(2)}; portrait checked by screenshot only)`);
+      `screen x ${sideR.toFixed(2)} on the right facing ${faceR === -1 ? 'left' : 'right'}; on the other side x ${sideL.toFixed(2)} facing ${faceL === 1 ? 'right' : 'left'} (aspect ${(innerWidth / innerHeight).toFixed(2)}; portrait checked by screenshot only)`);
 
     // B13-7: voice -> local intents
     cam.pose.recenter(); orient(55 + 110, 68); await sleep(300);
-    const table: [string, string][] = [['sit', 'sit'], ['roll over', 'roll_over'], ['play dead', 'play_dead'], ['can you dance', 'dance'], ['spin around', 'spin'], ['stay there', 'stay'], ['come here', 'come'], ['go to sleep', 'sleep'], ['wake up', 'wake'], ['shake', 'shake'], ['hide', 'hide'], ['fetch the ball', 'fetch_ball'], ['stop', 'stop'], ['stand up', 'stop'], ['sit down', 'sit']];
-    const bad = table.filter(([say, intent]) => { const c = parseCommand(say); return !(c && c.kind === 'intent' && c.intent === intent); }).map(x => x[0]);
-    e.doIntent('stop'); await sleep(300); cam.heard('please sit'); await sleep(350);
-    const sat = e.beh.anim.clip === e.pack.clips[e.pack.intents.sit];
-    const praise = parseCommand('good boy')?.kind === 'praise', feedCmd = parseCommand('want a treat')?.kind === 'feed', none = parseCommand('what time is it') === null;
-    add('voice', 'B.13-7 voice commands trigger local intents; no mic self-trigger', bad.length === 0 && sat && praise && feedCmd && none ? null : false,
-      `${table.length - bad.length}/${table.length} phrases map to the right intent${bad.length ? ' (wrong: ' + bad.join(', ') + ')' : ''}, "please sit" -> sit clip ${sat}. The Play shell plays no TTS/SFX, so there is nothing to self-trigger. Real speech recognition NOT exercised`);
+const bad = SELF_CHECK.filter(([say, want]) => (interpret(say)?.id ?? null) !== want).map(([say, want]) => `"${say}" -> ${interpret(say)?.id ?? 'none'} (want ${want})`);
+    // each command, spoken as text, must start a scripted routine; a held pose holds; nonsense gets the wag + hearts
+    e.doIntent('stop'); await sleep(300); cam.interpretingSince = performance.now(); cam.heard('sot dawn'); await sleep(900);
+    const sat = e.beh.anim.clip === e.pack.clips.sit; await sleep(3500); const stillSat = e.beh.anim.clip === e.pack.clips.sit;
+    cam.interpretingSince = performance.now(); cam.heard('lie down'); await sleep(700); const lay = e.beh.anim.clip === e.pack.clips.lie;
+    cam.interpretingSince = performance.now(); cam.heard('stand up'); await sleep(700); const stood2 = e.state === 'idle';
+    e.placePet(0, 0, false); await sleep(200); const xStart = ndc().x;
+    cam.interpretingSince = performance.now(); cam.heard('go left'); await sleep(2600); const xL = ndc().x;
+    cam.interpretingSince = performance.now(); cam.heard('go right please'); await sleep(2600); const xR = ndc().x;
+    const d0 = pos().distanceTo(e.camera.position); cam.interpretingSince = performance.now(); cam.heard('come here'); await sleep(2600); const d1 = pos().distanceTo(e.camera.position);
+    const parts0 = e.props.parts.length; cam.interpretingSince = performance.now(); cam.heard('the weather is nice');
+    await until(() => e.props.parts.length > parts0 && e.beh.anim.clip === e.pack.clips.wag, 2500);
+    const loved = e.props.parts.length > parts0 && e.beh.anim.clip === e.pack.clips.wag;
+    // slow answer: 4 s after "interpreting" starts with no result, the same wag + hearts
+    e.doIntent('stop'); await sleep(2600); const parts1 = e.props.parts.length; cam.voiceState('interpreting'); await sleep(3500);
+    const early = e.beh.anim.clip === e.pack.clips.wag; // must not fire before the 4 s mark
+    await until(() => e.props.parts.length > parts1 && e.beh.anim.clip === e.pack.clips.wag, 3500);
+    const slowLove = !early && e.props.parts.length > parts1 && e.beh.anim.clip === e.pack.clips.wag; cam.voiceState('idle');
+    e.doIntent('stop'); e.placePet(0, 0, false); e.facePet(1); await sleep(1600); // side-on again (head-on, its shadow reaches under the shutter) and let the hearts fade before the capture test
+    add('voice', 'B.13-7 anything said becomes the nearest of the 19 commands (or a wag + hearts); poses hold; slow answers still get a reaction',
+      bad.length === 0 && sat && stillSat && lay && stood2 && xL < xStart - 0.1 && xR > xL + 0.1 && d1 < d0 - 0.2 && loved && slowLove ? null : false,
+      `${SELF_CHECK.length - bad.length}/${SELF_CHECK.length} phrases resolve as expected${bad.length ? ' (wrong: ' + bad.join('; ') + ')' : ''}; "sot dawn" -> sit ${sat}, still sat after 3.5 s ${stillSat}; "lie down" ${lay}; "stand up" ${stood2}; "go left" moved screen x ${xStart.toFixed(2)} -> ${xL.toFixed(2)}, "go right" -> ${xR.toFixed(2)}; "come here" ${d0.toFixed(2)} m -> ${d1.toFixed(2)} m; nonsense -> wag + hearts ${loved}; 4 s without an answer -> wag + hearts ${slowLove}. Text fed to the matcher: real speech NOT exercised here`);
 
     // B13-8: capture = camera frame + dog, no UI
     e.doIntent('stop'); e.placePet(0, 0, false); await sleep(600);

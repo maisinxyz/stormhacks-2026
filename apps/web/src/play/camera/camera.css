@@ -56,3 +56,9 @@
 @keyframes cam-pulse { 50% { opacity: .35; } }
 @keyframes cam-dots { 0% { width: 0; } 100% { width: 1.4em; } }
 @media (prefers-reduced-motion: reduce) { .cam-btn.busy::after, .cam-voice::before, .cam-voice::after { animation: none; } }
+
+/* the dog's speech bubble */
+.cam-bubble { position: absolute; transform: translate(-50%, -100%); padding: 6px 12px; border-radius: 16px; background: #fff; color: #222; font-weight: 700;
+  pointer-events: none; box-shadow: 0 2px 10px rgba(0,0,0,.25); animation: cam-bubble .95s ease-out forwards; }
+@keyframes cam-bubble { 0% { opacity: 0; margin-top: 8px; } 15% { opacity: 1; margin-top: 0; } 75% { opacity: 1; } 100% { opacity: 0; margin-top: -14px; } }
+@media (prefers-reduced-motion: reduce) { .cam-bubble { animation: none; } }

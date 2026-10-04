@@ -26,6 +26,9 @@ export interface BehaviorHost {
   dropBall(x: number, y: number): void;
 }
 
+/** One beat of a scripted behaviour (voice commands in the Play camera): play a clip, walk somewhere, or call back (sound, hearts). */
+export type PerformStep = { clip: string; secs?: number; speed?: number; hold?: boolean } | { to: { x: number; z: number }; fast?: boolean } | { call: () => void };
+
 type Step = (dt: number) => boolean;
 type Routine = Generator<Step, void, void>;
 
@@ -60,7 +63,24 @@ export class Behavior {
   // ---------- public inputs ----------
   setMode(m: Mode) { this.mode = m; if (this.state === 'idle' || this.state === 'play') this.start(this.idle(), m === 'play' ? 'play' : 'idle'); }
   /** Turn the idle pose toward +x (1) or -x (-1). Applied now, and again when a walk in progress arrives (walking faces the way it travels). */
-  face(sign: 1 | -1) { this.dir = this.arriveDir = sign; }
+  face(sign: 1 | -1) { this.dir = this.arriveDir = sign; this.faceYaw = undefined; }
+  /** Turn the body toward a floor point (e.g. the camera) while it is not walking. */
+  faceToward(x: number, z: number) { if (Math.hypot(x - this.x, z - this.z) > 1e-3) this.faceYaw = Math.atan2(x - this.x, z - this.z); }
+  private faceYaw?: number;
+  /** Run a scripted sequence; a new command (or any other routine) replaces it at once. `hold` keeps the last clip until then. */
+  perform(steps: PerformStep[]) {
+    if (this.state === 'exit' || this.state === 'working' || this.state === 'return' || this.state === 'approval') return;
+    this.arriveDir = undefined;
+    this.start(this.performRoutine(steps), 'intent');
+  }
+  private *performRoutine(steps: PerformStep[]): Routine {
+    for (const s of steps) {
+      if ('call' in s) s.call();
+      else if ('to' in s) yield* this.walkTo(s.to.x, s.to.z, !!s.fast);
+      else if (s.hold) { this.playClip(s.clip, s.speed ?? 1); yield () => false; }
+      else yield* this.play(s.clip, s.secs, s.speed ?? 1);
+    }
+  }
   private arriveDir?: 1 | -1;
   setAutonomous(on: boolean) { this.autonomous = on; if (this.state === 'idle' || this.state === 'play') this.start(this.idle(), this.state); }
   setListening(on: boolean) {
@@ -140,8 +160,8 @@ export class Behavior {
     const mood = MOODS[this.mood];
     const pose = applyMood(this.anim.update(dt * mood.speed * this.speedBias), this.mood);
     // face travel direction; idle poses are 3/4 view toward the camera
-    const target = this.moving ? this.dir * Math.PI / 2 : this.dir * 0.7;
-    this.yaw += (target - this.yaw) * Math.min(1, dt * 8);
+    const target = this.moving ? this.dir * Math.PI / 2 : this.faceYaw ?? this.dir * 0.7;
+    this.yaw += Math.atan2(Math.sin(target - this.yaw), Math.cos(target - this.yaw)) * Math.min(1, dt * 8); // shortest way round
     this.moving = false;
     this.y += ((this.targetY - this.y)) * Math.min(1, dt * 10);
     return { pose, x: this.x, y: this.y + (pose.y ?? 0), z: this.z, yaw: this.yaw + (pose.yaw ?? 0) };
@@ -181,6 +201,7 @@ export class Behavior {
     const fast = typeof zOrFast === 'boolean' ? zOrFast : fastArg;
     const name = fast ? this.pack.locomotion.run : this.pack.locomotion.walk, c = this.pack.clips[name];
     this.playClip(name);
+    this.faceYaw = undefined; // walking faces the way it travels
     this.fast = fast;
     const spd = (c.move ?? 0.7) * MOODS[this.mood].speed;
     yield dt => {

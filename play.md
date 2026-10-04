@@ -459,10 +459,36 @@ Works on iOS and Android with no AR support.
 | **Tap the floor** | `POINT`: the dog walks there |
 | **Pinch** | Scale the dog |
 | **Mic (tap to toggle)** | Tap to start, tap again to stop; it also stops by itself about 1 s after you finish speaking (level-based, relative to the room noise), after 6 s of silence, or at 8 s. While recording the mic button swells with your voice and a "Listening" pill shows. From the end of recording until a command is found a blue spinner and an **"Interpreting..."** pill show and the dog stays in its listening pose, so it never looks like nothing is happening. Two recognizers side by side: the browser's own (fast, but needs Google/Apple's service) and **Whisper on the device** (`whisper.ts`, transformers.js, `whisper-tiny.en`, no key and no server, about 40 MB downloaded once then cached; about 1.5-2 s per phrase on a laptop). A phrase that parses as a command wins immediately, otherwise the Whisper text is used; clips under 0.35 s or near silence are ignored; the clip is normalised before recognition so a quiet microphone is not a different transcript. The model downloads in the background when the camera opens. Matching is tolerant of common mishearings ("sit" → "sieve", "set", "sat"). → local intents (`sit`, `stay`, `come`, `speak`, `roll_over`, `spin`, `play_dead`, `shake`, `dance`, `hide`, `sleep`, `wake`, `stop`/"stand") plus "follow" → `engine.doIntent`. A failure shows the real reason (blocked mic, no speech service, nothing heard), never a generic message. Server-side transcription is the next step if the target browser has no speech service |
-| **Action chips** | Sit, Stand, Stay, Come, Spin, Roll over, Follow, Swap side, Treat, Ball, Recenter. The command chips are the fallback when speech is unavailable; they do not count as voice working |
+| **Menu (⋯)** | Only "My dog photo" and "Recenter" (plus "True AR" where the device supports it). Commands are spoken; there are no command buttons |
 | **Capture** | See B.9 |
 
 The existing `Interactions` window listeners keep working; Person B only needs the camera view's `toWorld` mapping to use the virtual ground plane (`setGroundPlane`) and the camera pose.
+
+### B.7a Voice commands (`play/commands.ts`, `camera.ts`)
+**Whatever the user says, the dog does something.** The transcript goes to a local matcher (no network, no key): each word is compared with every command's phrases by spelling (edit distance) and by sound (same first letter and consonant skeleton), filler words count for little, and the best command above a low floor wins; ties go to the command whose key word was said first. So "sot dawn" is Sit, "sit" is Sit, and "I want you to roll over on the floor right now" is Roll over. If nothing relates, or no answer arrives within 4 s, the dog wags with hearts; an answer that arrives later (up to 8 s) is still performed. A new command replaces the running one at once.
+
+| Command | Behaviour |
+|---|---|
+| Sit | sits, faces you, tail wags; holds until the next command |
+| Come here | runs to about 1.2 m from you, woof, wags |
+| Follow me | keeps in front of you as you turn, until another command |
+| Lie down | belly down, head on paws (new `lie` clip); holds until the next command |
+| Jump | hops, lands, woof, wags |
+| Go left / right | walks about 0.9 m across the screen, stops, looks at you |
+| Go up / down | moves away from you / toward you (screen directions) |
+| Turn around | spins, ends facing you |
+| I love you | runs closer, head tilts, hearts, wags |
+| Good dog | hearts, jump, fast wag |
+| Give me your paw | raises a paw toward you for about 2.5 s |
+| Say hi | waves a paw, woof |
+| Look at me | turns to face you and holds the look for 3 s |
+| Dance | sparkles, dances, spins, woof |
+| Play dead | falls over, lies still 3 s, springs up, wags |
+| Roll over | rolls, stands |
+| Surprise me | sparkles and a random trick (never the same twice in a row) |
+| Stand up (unlisted) | "stand up", "get up", "stop": ends a held Sit or Lie down |
+
+The "woof" is a synthesized bark (`play/sfx.ts`, no audio files), a head jerk and a "Woof!" bubble; it plays only after the microphone has closed. Limits: English, word-level matching (no paraphrase understanding such as "make yourself comfy"); directions are screen directions, not real-world surfaces.
 
 ### B.8 Integration effects (making it feel in the world)
 - **Ambient tint (`tint.ts`):** every ~500 ms downsample the video frame to a tiny canvas and compute the average color. Feed it to a new `uTint` uniform in the splat fragment shader (multiplied into `vColor`, strength about 15–25%) so the dog picks up the room's color temperature. Keep it subtle and smoothed (low-pass over time).

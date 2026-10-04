@@ -1,39 +1,8 @@
-// Push-to-talk voice for the Play shell (play.md B.7 / A.7). Web Speech API + the local-intent table from PRD.md 2.4.
+// Voice input for the Play shell (play.md B.7 / A.7): records a turn and returns what was said. commands.ts decides what it means.
 // ponytail: browser speech recognition only (Chrome, Safari); swap in the F2 ElevenLabs Scribe path when the Play shell
 // shares a build with apps/desk.
-import type { LocalIntent } from '@fetch/contracts';
+import { interpret, SURE } from './commands';
 import { loadWhisper, rms, toPcm, transcribe } from './whisper';
-
-export type VoiceCommand = { kind: 'intent'; intent: LocalIntent } | { kind: 'praise' } | { kind: 'feed' } | { kind: 'follow' } | { kind: 'swap' };
-
-// Whisper (and every recognizer) mishears single short words, so each command lists the words it commonly turns into
-// ("sit" -> "sieve", "set", "sat"). The mic only listens for commands, so the looser match is safe.
-const TABLE: [RegExp, VoiceCommand][] = [
-  [/\b(roll(ing)? over|role over|rollover)\b/, { kind: 'intent', intent: 'roll_over' }],
-  [/\bplay(ing)? (dead|dad)\b/, { kind: 'intent', intent: 'play_dead' }],
-  [/\b(fetch(es|ed)?|get the ball|ball)\b/, { kind: 'intent', intent: 'fetch_ball' }],
-  [/\bgood (boy|girl|pet|dog|bird|puppy)\b/, { kind: 'praise' }],
-  [/\b(treat|feed|dinner|food)\b/, { kind: 'feed' }],
-  [/\b(other side|switch sides?|swap( sides?)?|move over)\b/, { kind: 'swap' }], // camera view: stand on the other side of the shot
-  [/\bfollow\b/, { kind: 'follow' }], // camera view: keep in front of the user as they turn
-  [/\b(wake( up)?|woke up|week up)\b/, { kind: 'intent', intent: 'wake' }],
-  [/\b(sleep|asleep|nap|bed ?time)\b/, { kind: 'intent', intent: 'sleep' }],
-  [/\b(sit(s|ting)?|sat|set|seat|sieve|sip|sin|sid)\b/, { kind: 'intent', intent: 'sit' }],
-  [/\b(stay|stray|stage|state)\b/, { kind: 'intent', intent: 'stay' }],
-  [/\b(come|calm|coming|c'?mon|common|here)\b/, { kind: 'intent', intent: 'come' }],
-  [/\b(speak|bark(s)?|park)\b/, { kind: 'intent', intent: 'speak' }],
-  [/\b(spin|span|spend|spent)\b/, { kind: 'intent', intent: 'spin' }],
-  [/\b(shake|paw)\b/, { kind: 'intent', intent: 'shake' }],
-  [/\b(dance|dense|stance)\b/, { kind: 'intent', intent: 'dance' }],
-  [/\bhide\b/, { kind: 'intent', intent: 'hide' }],
-  [/\btrick\b/, { kind: 'intent', intent: 'trick' }],
-  [/\b(stop|stand|get up|up)\b/, { kind: 'intent', intent: 'stop' }], // 'stop' is the stand-in-place intent
-];
-
-export function parseCommand(text: string): VoiceCommand | null {
-  const t = text.toLowerCase();
-  return TABLE.find(([re]) => re.test(t))?.[1] ?? null;
-}
 
 interface Recognition {
   lang: string; interimResults: boolean; continuous: boolean;
@@ -174,7 +143,8 @@ export class PushToTalk {
   /** Deliver a transcript once per turn: a recognised command at once, anything else only from Whisper. */
   private offer(text: string, turn: number, fromWhisper: boolean) {
     if (turn !== this.turn || this.done) return;
-    if (parseCommand(text) || fromWhisper) { this.done = true; this.set('idle'); this.onText(text); }
+    // a clear command from the fast recognizer needs no second opinion
+    if ((interpret(text)?.score ?? 0) >= SURE || fromWhisper) { this.done = true; this.set('idle'); this.onText(text); }
   }
 
   /** Whisper had nothing: fall back to what the browser heard, or say that nothing came through. */

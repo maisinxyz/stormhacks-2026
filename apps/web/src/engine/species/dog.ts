@@ -39,6 +39,7 @@ export const quadClips: Record<string, Clip> = {
   dance: clip(0.8, true, p => P({ root: [sw(p * 2, 0.15), 0, sw(p, 0.1)], legFL: [sw(p * 2, 0.5), 0, 0], legFR: [-sw(p * 2, 0.5), 0, 0], tail: [-0.2, wag(p * 2, 1, 0.9), 0] }, Math.abs(sw(p * 2, 0.08)))),
   hide: clip(1.5, true, (_p, t) => { const e = ease(t); return P({ root: [0.25 * e, 0, 0], head: [0.5 * e, 0, 0], ...lieDown(e * 0.6) }, -0.22 * e); }),
   sleep: clip(3.5, true, (p, t) => { const e = ease(t, 0.6); return P({ ...lieDown(e), root: [breathe(p) * 3, 0, 0], head: [0.5 * e, 0, 0] }, -0.32 * e); }),
+  lie: clip(2.5, true, (p, t) => { const e = ease(t, 0.5); return P({ ...lieDown(e), root: [breathe(p) * 2, 0, 0], head: [0.78 * e, 0, 0], tail: [0, sw(p, 0.28), 0] }, -0.33 * e); }),
   yawn: clip(1.6, false, p => { const k = Math.sin(Math.min(1, p) * Math.PI); return P({ head: [-0.7 * k, 0, 0], root: [-0.1 * k, 0, 0] }); }),
   dig: clip(0.5, true, p => P({ root: [0.3, 0, 0], legFL: [sw(p, 0.9), 0, 0], legFR: [-sw(p, 0.9), 0, 0], head: [0.5, 0, 0] }, -0.04)),
   pawKeys: clip(0.4, true, p => P({ root: [0.15, 0, 0], legFL: [-0.6 + sw(p, 0.3), 0, 0], legFR: [-0.6 - sw(p, 0.3), 0, 0], head: [0.4, 0, 0] })),

@@ -1,7 +1,10 @@
 // play.md Part B (B.2-B.8): the Snapchat-style camera view. Live video fills the screen, the engine canvas is
 // stacked on top (transparent), and the phone's orientation drives the 3D camera so the dog stays put in the room.
 import * as THREE from 'three';
-import { parseCommand, PushToTalk } from '../voice';
+import { interpret, type CommandId } from '../commands';
+import { bark } from '../sfx';
+import { PushToTalk } from '../voice';
+import type { PerformStep } from '../../engine/behavior';
 import type { OrientationStatus } from './pose';
 import type { LocalIntent } from '@fetch/contracts';
 import type { PlayContext, PlayView, PlayViewId } from '../types';
@@ -21,13 +24,11 @@ const PLACE_MIN = 0.8, PLACE_MAX = 5;        // tap-to-place distance from the u
 const TAP_PX = 8, TAP_MS = 350, HOLD_MS = 600;
 // Web Speech error codes -> what the user can do about it (anything else shows the raw code)
 const VOICE_ERRORS: Record<string, string> = {
-  'not-allowed': 'Microphone access is blocked. Allow it in the browser, or use the command buttons under ⋯.',
-  'service-not-allowed': 'This browser blocks speech recognition. Use the command buttons under ⋯.',
-  'audio-capture': 'No microphone found. Use the command buttons under ⋯.',
-  network: 'Speech recognition could not reach its service (needs Chrome or Safari, online). Use the command buttons under ⋯.',
-  'no-speech': 'Did not hear anything. Tap the mic, then speak.',
-  'model-unavailable': 'The voice model could not be downloaded (needs internet once). Use the command buttons under ⋯.',
+  'not-allowed': 'Microphone access is blocked. Allow it in the browser to talk to your dog.',
+  'audio-capture': 'No microphone found.',
+  'model-unavailable': 'The voice model could not be downloaded (needs internet once).',
 };
+const SLOW_MS = 4000, LATE_MS = 8000; // no command within 4 s -> wag + hearts; an answer later than 8 s is dropped
 const LOOK_AROUND = new URLSearchParams(location.search).get('orient') === 'mouse';
 const CARRY_PX = 48;                         // a press on the dog that travels this far is a carry, not a stroke
 
@@ -78,16 +79,11 @@ export class CameraView implements PlayView {
       this.alive = new Alive(e);
       this.tint = new AmbientTint(this.stream.video, e);
       this.xr = new XrTier(e, ctx.root, () => this.xrEnded());
-      this.voice = new PushToTalk(t => this.heard(t), code => this.ui.toast(VOICE_ERRORS[code] ?? `Voice error (${code}). Use the command buttons under ⋯.`, 6000), text => this.ui.toast(text, 4000), s => this.voiceState(s));
+      this.voice = new PushToTalk(t => this.heard(t), code => this.voiceFailed(code), text => this.ui.toast(text, 4000), s => this.voiceState(s));
       this.ui = new CameraUi({
         back: () => ctx.switchTo('room'),
         flip: () => void this.stream.flip().catch(err => this.fail(err)),
         recenter: () => this.recenter(),
-        treat: () => { if (e.feed()) this.alive.focus(2); },
-        ball: () => e.doIntent('fetch_ball'),
-        command: i => { this.following = false; this.alive.focus(2.5); e.doIntent(i); },
-        follow: () => this.follow(),
-        swap: () => this.swapSide(),
         photo: f => void this.usePhoto(f),
         mic: () => this.voice.toggle(),
         ar: () => void this.toggleXr(),
@@ -262,16 +258,21 @@ export class CameraView implements PlayView {
     if (s !== 'idle') this.alive.focus(10);
     window.clearInterval(this.levelTimer);
     if (s === 'listening') this.levelTimer = window.setInterval(() => this.ui.micLevel(this.voice.micLevel), 60);
+    window.clearTimeout(this.slowTimer);
+    if (s === 'interpreting') { // slow answer: react now with a wag and hearts; the real command still runs when it arrives
+      this.interpretingSince = performance.now();
+      this.slowTimer = window.setTimeout(() => this.love(), SLOW_MS);
+    }
+  }
+  private slowTimer = 0;
+  private interpretingSince = 0;
+  /** The microphone or the recognizer failed: say why when the user can fix it, and still give them a happy dog. */
+  private voiceFailed(code: string) {
+    window.clearTimeout(this.slowTimer);
+    if (VOICE_ERRORS[code]) this.ui.toast(VOICE_ERRORS[code], 6000);
+    this.love();
   }
   private levelTimer = 0;
-
-  private swapSide() {
-    this.following = false;
-    this.side = -this.side as 1 | -1;
-    try { sessionStorage.setItem('fetch.play.side', String(this.side)); } catch { /* private mode */ }
-    this.placeSide(true);
-    this.alive.focus(2);
-  }
 
   private recenter() {
     this.following = false;
@@ -281,18 +282,76 @@ export class CameraView implements PlayView {
     this.ui.toast('Recentered.');
   }
 
-  // ---------- voice (B.7): push-to-talk -> local intents ----------
+  // ---------- voice (B.7): whatever is said becomes the nearest command; the dog always does something ----------
   private heard(text: string) {
-    const c = parseCommand(text), e = this.ctx.engine;
-    if (!c) { this.ui.toast(`Heard "${text}". Try sit, stand, spin, dance, roll over...`, 5000); return; }
-    this.alive.focus(2.5);
+    window.clearTimeout(this.slowTimer);
+    const late = this.interpretingSince > 0 && performance.now() - this.interpretingSince > LATE_MS; // far too late to be a reply to what was said
+    this.interpretingSince = 0;
+    if (late) return;
+    const m = interpret(text);
+    this.ui.toast(m ? `Heard "${text}" → ${m.label}` : `Heard "${text}"`, 3000);
+    if (m) this.run(m.id); else this.love();
+  }
+
+  /** Nothing understood, nothing heard, or the answer is slow: a happy wag and hearts, so the dog never ignores the user. */
+  private love() {
+    const e = this.ctx.engine;
     this.following = false;
-    if (c.kind === 'follow') this.follow();
-    else if (c.kind === 'swap') this.swapSide();
-    else if (c.kind === 'intent') e.doIntent(c.intent);
-    else if (c.kind === 'praise') e.react('tap');
-    else e.feed();
-    this.ui.toast(`Heard "${text}"`, 2500); // caption of what was heard
+    this.alive.focus(2.5);
+    e.perform([{ call: () => e.faceToward(e.camera.position.x, e.camera.position.z) }, { call: () => e.flourish('heart') }, { clip: 'wag', secs: 2 }]);
+  }
+
+  private woof() {
+    bark();
+    const e = this.ctx.engine, p = e.petPosition;
+    p.y += 1.05 * e.scaleNow;
+    const n = p.project(e.camera);
+    this.ui.bubble('Woof!', (n.x + 1) / 2 * innerWidth, (1 - n.y) / 2 * innerHeight);
+  }
+
+  private lastSurprise = -1;
+  /** The 19 commands (+ "stand up"). A new command replaces the running one at once. Directions are the user's: left/right
+   *  across the screen, "up" away from the user, "down" toward them. */
+  private run(id: CommandId) {
+    const e = this.ctx.engine, cam = e.camera, p = e.petPosition;
+    this.following = false;
+    this.alive.focus(3);
+    const f = cam.getWorldDirection(new THREE.Vector3()); f.y = 0;
+    if (f.lengthSq() < 1e-4) f.set(0, 0, -1);
+    f.normalize();
+    const right = new THREE.Vector3(-f.z, 0, f.x), foot = new THREE.Vector3(cam.position.x, 0, cam.position.z);
+    /** A floor point `a` metres to the user's right and `b` metres away from them, kept within reach of the camera. */
+    const by = (a: number, b: number) => { const d = new THREE.Vector3(p.x, 0, p.z).addScaledVector(right, a).addScaledVector(f, b).sub(foot); return foot.clone().add(d.setLength(THREE.MathUtils.clamp(d.length(), PLACE_MIN, PLACE_MAX))); };
+    /** The point `dist` metres from the user, on the line to the dog. */
+    const near = (dist: number) => { const d = new THREE.Vector3(p.x - foot.x, 0, p.z - foot.z); if (d.lengthSq() < 1e-4) d.copy(f); return foot.clone().add(d.setLength(dist)); };
+    const face: PerformStep = { call: () => e.faceToward(cam.position.x, cam.position.z) };
+    const woof: PerformStep[] = [{ call: () => this.woof() }, { clip: 'perk', secs: 0.55 }];
+    const hearts: PerformStep = { call: () => e.flourish('heart') }, sparkle: PerformStep = { call: () => e.flourish('sparkle') };
+    const wag = (secs = 1.3, speed = 1): PerformStep => ({ clip: 'wag', secs, speed });
+    const go = (a: number, b: number): PerformStep[] => [{ to: by(a, b) }, face, { clip: 'stand', secs: 1 }];
+    const tricks: PerformStep[][] = [
+      [{ clip: 'beg', secs: 2.4 }], [{ clip: 'playBow', secs: 1.4 }, { clip: 'jump' }], [{ clip: 'spin' }, { clip: 'spin' }],
+      [{ clip: 'roll' }, { clip: 'jump' }], [{ clip: 'hide', secs: 1.6 }, { clip: 'startle' }], [{ clip: 'scratch', secs: 2 }], [{ clip: 'count', secs: 2 }],
+    ];
+    const seq: Record<Exclude<CommandId, 'follow'>, () => PerformStep[]> = {
+      sit: () => [face, { clip: 'sit', hold: true }],
+      come: () => [{ to: near(1.2), fast: true }, face, ...woof, wag(1.5)],
+      lie: () => [face, { clip: 'lie', hold: true }],
+      jump: () => [face, { clip: 'jump' }, ...woof, wag(1)],
+      left: () => go(-0.9, 0), right: () => go(0.9, 0), up: () => go(0, 0.9), down: () => go(0, -0.9),
+      turn: () => [{ clip: 'spin' }, face, { clip: 'stand', secs: 0.6 }],
+      love: () => [{ to: near(1), fast: true }, face, hearts, { clip: 'tilt', secs: 1.6 }, hearts, wag(1.5)],
+      good: () => [face, hearts, { clip: 'jump' }, wag(1.6, 1.8)],
+      paw: () => [face, { clip: 'shake', secs: 2.6 }],
+      hi: () => [face, { clip: 'shake', secs: 1.6, speed: 1.4 }, ...woof],
+      look: () => [face, { clip: 'perk', secs: 3 }],
+      dance: () => [sparkle, { clip: 'dance', secs: 2.4 }, { clip: 'spin' }, face, ...woof],
+      dead: () => [face, { clip: 'playDead', secs: 3.2 }, { clip: 'startle' }, wag(1)],
+      roll: () => [{ clip: 'roll' }, { clip: 'stand', secs: 0.5 }],
+      surprise: () => { let i = this.lastSurprise; while (i === this.lastSurprise) i = Math.floor(Math.random() * tricks.length); this.lastSurprise = i; return [sparkle, face, ...tricks[i]]; },
+      stand: () => [{ clip: 'stand', secs: 0.3 }],
+    };
+    if (id === 'follow') this.follow(); else e.perform(seq[id]());
   }
 
   // ---------- WebXR tier (B.5) ----------

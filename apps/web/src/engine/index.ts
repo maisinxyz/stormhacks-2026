@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { ActionStep, BusEvent, LocalIntent, Mode, Mood, PetBundle, PetEngine, Platform, RunEvent, Species } from '@fetch/contracts';
 import { Bus } from './bus';
 import { generatePet as runPipeline } from './pipeline/generate';
-import { Behavior, type BehaviorHost, type FurnitureSpot } from './behavior';
+import { Behavior, type BehaviorHost, type FurnitureSpot, type PerformStep } from './behavior';
 import { Interactions } from './interactions';
 import { Needs, type Stats } from './needs';
 import { BALL_R, Toys } from './toys';
@@ -225,6 +225,10 @@ export class Engine implements PetEngine {
   setPetScale(s: number) { this.petScale = s; }
   /** A little burst above the pet: hearts when it is petted, sparkles when it appears (camera view flourish). */
   flourish(kind: 'heart' | 'sparkle') { const p = this.petPosition; p.y += 1.05 * this.petScale; this.props?.burst(kind, p, kind === 'heart' ? 4 : 14); }
+  /** Scripted behaviour (Play camera voice commands): clips, walks and callbacks in order. */
+  perform(steps: PerformStep[]) { this.walkTo = undefined; this.beh?.perform(steps); }
+  /** Turn the pet's body toward a floor point. */
+  faceToward(x: number, z: number) { this.beh?.faceToward(x, z); }
   private autonomous = true;
   /** false = the pet only moves on a command (camera view). */
   setAutonomous(on: boolean) { this.autonomous = on; this.beh?.setAutonomous(on); }
