@@ -38,6 +38,8 @@ export class Interactions {
   private ring = 0;        // seconds of continuous approving stroke
   private locked = false;  // APPROVE already fired for this pending approval
   private flick: { x: number; y: number; t: number }[] = [];
+  /** false = ignore the pointer entirely (the first-person room owns it: pointer lock, throwing, feeding). */
+  enabled = true;
 
   constructor(private h: InteractionHost) {
     window.addEventListener('pointerdown', this.onDown);
@@ -51,7 +53,7 @@ export class Interactions {
     window.addEventListener('click', e => {
       // F2 normally sends POINT itself; when the click lands on the bare page, do it here
       const t = e.target as HTMLElement;
-      if ((t === document.body || t === document.documentElement) && !this.down?.onPet && performance.now() > this.suppressClickUntil) this.point(e.clientX, e.clientY);
+      if (this.enabled && (t === document.body || t === document.documentElement) && !this.down?.onPet && performance.now() > this.suppressClickUntil) this.point(e.clientX, e.clientY);
     });
   }
 
@@ -73,6 +75,7 @@ export class Interactions {
   }
 
   private onDown = (e: PointerEvent) => {
+    if (!this.enabled) return;
     const onPet = this.h.hitPet(e.clientX, e.clientY), ball = !onPet && this.h.hitBall(e.clientX, e.clientY);
     if (!onPet && !ball && this.h.isGestureClaimed?.(e.pointerId)) { this.down = undefined; return; }
     const startWorld = onPet ? this.h.toWorld(e.clientX, e.clientY) : undefined;
@@ -83,6 +86,7 @@ export class Interactions {
   };
 
   private onMove = (e: PointerEvent) => {
+    if (!this.enabled) return;
     const w = this.h.toWorld(e.clientX, e.clientY);
     if (w) this.h.cursor(w.x, w.y);
     const d = this.down;
@@ -109,6 +113,7 @@ export class Interactions {
   };
 
   private onUp = (e: PointerEvent) => {
+    if (!this.enabled) { this.down = undefined; return; }
     const d = this.down;
     this.down = undefined;
     if (!d) return;

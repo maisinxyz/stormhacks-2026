@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
 import { animate, motion, useAnimationControls, useDragControls, useInView, useMotionValue, type PanInfo } from 'motion/react'
-import { ChevronDown, ExternalLink, FileText, Inbox, MoreHorizontal, PawPrint } from './icons'
+import { ExternalLink, Inbox, MoreHorizontal, PawPrint } from './icons'
 import { CardPeeker, Mascot } from './DeskLife'
 import { platformsChanged, spring, useCalm } from './motion'
 import type { Mode, PlatformRect, Species } from './contracts'

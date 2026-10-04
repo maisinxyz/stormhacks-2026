@@ -97,6 +97,7 @@ export class Engine implements PetEngine {
     this.inter = new Interactions(this.interactionHost());
     canvas.style.pointerEvents = 'none';
     window.addEventListener('pointermove', e => {
+      if (!this.pointerInput) { canvas.style.pointerEvents = 'none'; canvas.style.cursor = 'default'; return; }
       const ball = this.hitBall(e.clientX, e.clientY), pet = this.hitTest(e.clientX, e.clientY);
       canvas.style.pointerEvents = pet || ball ? 'auto' : 'none';
       canvas.style.cursor = ball ? 'grab' : pet ? 'pointer' : 'default';
@@ -574,6 +575,9 @@ export class Engine implements PetEngine {
   setMode(mode: Mode) { this.mode = mode; this.beh?.setMode(mode); }
   setView(v: 'desk' | 'room' | 'camera', opts?: { petScale?: number }) { this.view = v; this.petScale = opts?.petScale ?? (v === 'room' ? 0.55 : v === 'camera' ? 0.45 : 1); this.setGroundPlane(v === 'desk' ? 0 : this.groundPlane); }
   setExternalCamera(on: boolean) { this.externalCamera = on; }
+  private pointerInput = true;
+  /** false = the engine ignores the pointer (no pet drag, poke or stroke): the first-person room handles input itself. */
+  setPointerInteractions(on: boolean) { this.pointerInput = on; if (this.inter) this.inter.enabled = on; }
   get cameraRef() { return this.camera; }
   setOverlayScene(scene: THREE.Scene | null) { if (this.overlay) this.scene.remove(this.overlay); this.overlay = scene ?? undefined; if (this.overlay) { this.overlay.renderOrder = -10; this.scene.add(this.overlay); } }
   setGroundPlane(y: number) { this.groundPlane = y; }
