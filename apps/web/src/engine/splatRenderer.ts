@@ -2,7 +2,7 @@
 // Chosen over Spark to avoid depending on its shader-hook API; PRD 1.3 allows this fallback.
 // Splat data lives in one float texture (6 texels/splat); the only per-sort upload is a 4 B/splat draw-order attribute,
 // so a 300k re-sort is a counting sort + 1.2 MB upload instead of re-permuting every attribute.
-// ponytail: depth sort uses rest-pose centers only (CPU, throttled, on camera-direction change); move to a worker / posed centers if overlap artifacts show.
+// Depth sort uses posed centers (each splat moved by its dominant bone), re-run on camera change and while the pet animates.
 import * as THREE from 'three';
 
 export const MAX_BONES = 16;
@@ -47,16 +47,21 @@ void main() {
                 uFocal.x*cam.x/(tz*tz), uFocal.y*cam.y/(tz*tz), 0.);
   mat3 T = J * W * M;
   mat3 cov = T * transpose(T);
-  float a = cov[0][0] + .3, b = cov[0][1], d = cov[1][1] + .3;
+  // 0.3 px^2 low-pass dilation (as in 3DGS) keeps sub-pixel splats from aliasing; scale opacity by
+  // sqrt(det/det') so the dilation doesn't also make thin splats look fatter and more opaque.
+  float a0 = cov[0][0], b = cov[0][1], d0 = cov[1][1];
+  float a = a0 + .3, d = d0 + .3;
+  float aa = sqrt(max(a0 * d0 - b * b, 1e-12) / max(a * d - b * b, 1e-12));
   float mid = .5*(a+d), r = length(vec2(.5*(a-d), b));
   float l1 = mid + r, l2 = max(mid - r, .1);
   vec2 v1 = normalize(vec2(b, l1 - a) + vec2(1e-6, 0.));
-  vec2 ax1 = min(sqrt(2.*l1), 1024.) * v1;
-  vec2 ax2 = min(sqrt(2.*l2), 1024.) * vec2(-v1.y, v1.x);
+  // Quad extends 3 sigma along each eigen-axis (sigma = sqrt(eigenvalue), in pixels).
+  vec2 ax1 = min(3. * sqrt(l1), 1024.) * v1;
+  vec2 ax2 = min(3. * sqrt(l2), 1024.) * vec2(-v1.y, v1.x);
   vec4 clip = projectionMatrix * cam;
   vec2 ndc = clip.xy / clip.w;
-  vPos = corner * 2.;
-  vColor = aColor;
+  vPos = corner * 3.;  // in sigma units
+  vColor = vec4(aColor.rgb, aColor.a * aa);
   gl_Position = vec4(ndc + (corner.x*ax1 + corner.y*ax2) * 2. / uViewport, clip.z/clip.w, 1.);
 }`;
 
@@ -65,9 +70,11 @@ precision highp float;
 uniform vec3 uTint;
 in vec4 vColor; in vec2 vPos; out vec4 outColor;
 void main() {
-  float A = -dot(vPos, vPos);
-  if (A < -4.) discard;
-  float a = exp(A) * vColor.a;
+  // True Gaussian falloff exp(-r^2/2) with r in sigma units, cut at 3 sigma.
+  float r2 = dot(vPos, vPos);
+  if (r2 > 9.) discard;
+  float a = min(.99, exp(-.5 * r2) * vColor.a);
+  if (a < 1. / 255.) discard;
   outColor = vec4(vColor.rgb * uTint * a, a);
 }`;
 
@@ -87,6 +94,8 @@ export class SplatMesh {
   private lastSortAt = 0;
   private geo = new THREE.InstancedBufferGeometry();
   private centers: Float32Array; // pre-shuffled rest-pose centers (never permuted)
+  private domBone: Uint8Array;   // per shuffled splat: bone with the largest skin weight (posed depth for sorting)
+  private lastBones = new Float32Array(MAX_BONES * 16);
   private order: Float32Array;
   private orderAttr: THREE.InstancedBufferAttribute;
   private lastDir = new THREE.Vector3(9, 9, 9);
@@ -101,9 +110,13 @@ export class SplatMesh {
     for (let i = n - 1; i > 0; i--) { r = (r * 1664525 + 1013904223) >>> 0; const j = r % (i + 1); [order[i], order[j]] = [order[j], order[i]]; }
     const W = RW * 6, H = Math.ceil(n / RW), data = new Float32Array(W * H * 4);
     this.centers = new Float32Array(n * 3);
+    this.domBone = new Uint8Array(n);
     for (let j = 0; j < n; j++) {
       const s = order[j], o = ((j >> 9) * W + (j & (RW - 1)) * 6) * 4, q = (k: number) => (u[s * 32 + 28 + k] - 128) / 128;
       this.centers.set([f[s * 8], f[s * 8 + 1], f[s * 8 + 2]], j * 3);
+      let best = 0;
+      for (let k = 1; k < 4; k++) if (w[s * 8 + 4 + k] > w[s * 8 + 4 + best]) best = k;
+      this.domBone[j] = w[s * 8 + best];
       data.set([
         f[s * 8], f[s * 8 + 1], f[s * 8 + 2], f[s * 8 + 3],
         f[s * 8 + 4], f[s * 8 + 5], q(0), q(1),
@@ -163,16 +176,41 @@ export class SplatMesh {
     const P = cam.projectionMatrix.elements;
     this.uniforms.uFocal.value.set(P[0] * size.x / 2, P[5] * size.y / 2);
     const dir = cam.getWorldDirection(new THREE.Vector3()).transformDirection(this.mesh.matrixWorld.clone().invert()); // sort in model space
-    if (dir.distanceTo(this.lastDir) > 0.01 && performance.now() - this.lastSortAt > 50) { this.lastDir.copy(dir); this.sort(dir); }
+    const now = performance.now();
+    if (now - this.lastSortAt < 50) return;
+    // Re-sort when the view turns, and while the pet animates (posed limbs change depth order).
+    if (dir.distanceTo(this.lastDir) > 0.01 || (now - this.lastSortAt > 120 && this.bonesMoved())) { this.lastDir.copy(dir); this.sort(dir); }
+  }
+
+  private bonesMoved() {
+    const bones = this.uniforms.uBones.value;
+    for (let b = 0; b < MAX_BONES; b++) {
+      const e = bones[b].elements;
+      for (let k = 0; k < 16; k++) if (Math.abs(e[k] - this.lastBones[b * 16 + k]) > 1e-3) return true;
+    }
+    return false;
   }
 
   // 16-bit counting sort on depth: O(n), far first (back-to-front).
   private sort(dir: THREE.Vector3) {
     const t0 = performance.now();
     const n = this.count, c = this.centers, d = new Float32Array(n);
+    // Per bone, depth of a rest-pose point p is row . (M_bone * p): precompute row = dir^T * M_bone (4 coefficients),
+    // so posed depth costs the same 4 multiply-adds as rest-pose depth.
+    const bones = this.uniforms.uBones.value, row = new Float32Array(MAX_BONES * 4);
+    for (let b = 0; b < MAX_BONES; b++) {
+      const e = bones[b].elements;
+      this.lastBones.set(e, b * 16);
+      row[b * 4] = dir.x * e[0] + dir.y * e[1] + dir.z * e[2];
+      row[b * 4 + 1] = dir.x * e[4] + dir.y * e[5] + dir.z * e[6];
+      row[b * 4 + 2] = dir.x * e[8] + dir.y * e[9] + dir.z * e[10];
+      row[b * 4 + 3] = dir.x * e[12] + dir.y * e[13] + dir.z * e[14];
+    }
+    const dom = this.domBone;
     let mn = Infinity, mx = -Infinity;
     for (let i = 0; i < n; i++) {
-      const v = c[i * 3] * dir.x + c[i * 3 + 1] * dir.y + c[i * 3 + 2] * dir.z;
+      const r = dom[i] * 4;
+      const v = c[i * 3] * row[r] + c[i * 3 + 1] * row[r + 1] + c[i * 3 + 2] * row[r + 2] + row[r + 3];
       d[i] = v; if (v < mn) mn = v; if (v > mx) mx = v;
     }
     const k = 65535 / (mx - mn || 1), counts = new Uint32Array(65537), key = new Uint16Array(n);

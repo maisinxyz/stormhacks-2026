@@ -1,15 +1,15 @@
 {
  "id": "demo-dog",
- "name": "dog",
+ "name": "Sunny",
  "species": "dog",
  "splatUrl": "/bundles/dog/pet.splat",
  "rigUrl": "/bundles/dog/rig.json",
  "weightsUrl": "/bundles/dog/weights.bin",
  "thumbnailUrl": "",
  "personality": {
-  "eager": 0.5,
-  "sassy": 0.5,
-  "anxious": 0.5,
+  "eager": 0.9,
+  "sassy": 0.2,
+  "anxious": 0.3,
   "chatty": 0.5
  },
  "stats": {
@@ -17,5 +17,5 @@
   "happiness": 80,
   "hunger": 0
  },
- "createdAt": "2026-10-04T00:14:58.935Z"
+ "createdAt": "2026-10-04T04:43:34.112Z"
 }

@@ -202,49 +202,51 @@ function distSeg(px: number, py: number, pz: number, a: T, b: T) {
 }
 
 /**
- * Which bones may influence a splat. Keeps left legs from pulling right-leg or belly splats, the head
- * from pulling the chest, and the tail from pulling the rump: the cause of tearing on moving limbs.
+ * How much each bone may influence a splat (0..1). Keeps left legs from pulling right-leg or belly splats,
+ * the head from pulling the chest, and the tail from pulling the rump. Every limit ramps over a band instead
+ * of cutting off, so neighbouring regions blend and moving bones never open a seam between them.
  */
-function eligibility(rig: Rig, g: Gaussians): (i: number, b: number) => boolean {
+const ramp = (v: number) => Math.max(0, Math.min(1, v));
+function influence(rig: Rig, g: Gaussians): (i: number, b: number) => number {
   const names = rig.bones.map(b => b.name);
-  if (rig.template !== 'quadruped2') return () => true;
+  if (rig.template !== 'quadruped2') return () => 1;
   const a = measureQuadruped(g), L = a.zFront - a.zBack;
+  const legCut = a.yBelly + 0.15 * (a.yTop - a.yBelly), midZ = (a.shoulderZ + a.hipZ) / 2;
   return (i, b) => {
     const x = g.pos[i * 3], y = g.pos[i * 3 + 1], z = g.pos[i * 3 + 2], n = names[b];
     if (n.startsWith('leg')) {
       const id = n.slice(3, 5) as 'FL' | 'FR' | 'BL' | 'BR', l = a.legs[id];
       const side = id[1] === 'L' ? 1 : -1, frontLeg = id[0] === 'F';
-      if (y > a.yBelly + 0.15 * (a.yTop - a.yBelly)) return false;
-      if (x * side < -0.012) return false;
-      const midZ = (a.shoulderZ + a.hipZ) / 2;
-      if (frontLeg ? z < midZ : z > midZ) return false;
-      // Stay within the leg's own column (blended toward the body above the belly).
-      const t = Math.max(0, Math.min(1, (l.top[1] - y) / (l.top[1] - l.foot[1] || 1)));
+      // Within the leg's own column (it leans from hip/shoulder to foot).
+      const t = ramp((l.top[1] - y) / (l.top[1] - l.foot[1] || 1));
       const cz = l.top[2] + (l.foot[2] - l.top[2]) * t;
-      return Math.abs(z - cz) < 0.16 * L;
+      return ramp((legCut + 0.06 - y) / 0.12)                       // fades into the body above the belly
+        * ramp((x * side + 0.03) / 0.04)                            // own side of the centreline
+        * ramp(((frontLeg ? z - midZ : midZ - z) + 0.03 * L) / (0.06 * L))
+        * ramp((0.2 * L - Math.abs(z - cz)) / (0.08 * L));
     }
-    if (n === 'neck' || n === 'head') return z > a.shoulderZ - 0.02 * L && y > a.yBelly * 0.8;
-    if (n === 'tail' || n === 'tail2') return z < a.hipZ - 0.04 * L;
-    return true;
+    if (n === 'neck' || n === 'head') return ramp((z - (a.shoulderZ - 0.06 * L)) / (0.08 * L)) * ramp((y - 0.7 * a.yBelly) / (0.2 * a.yBelly + 1e-6));
+    if (n === 'tail' || n === 'tail2') return ramp((a.hipZ - z) / (0.08 * L));
+    return 1;
   };
 }
 
 /** weights.bin: per splat 4x uint8 bone idx then 4x uint8 weight (sum 255). */
 export function skinWeights(g: Gaussians, rig: Rig, smooth = true): Uint8Array {
   const nb = rig.bones.length, n = g.n, w = new Float32Array(n * nb);
-  const ok = eligibility(rig, g);
+  const inf = influence(rig, g);
   for (let i = 0; i < n; i++) {
     const px = g.pos[i * 3], py = g.pos[i * 3 + 1], pz = g.pos[i * 3 + 2];
-    const d = rig.bones.map((b, id) => ({ id, d: ok(i, id) ? distSeg(px, py, pz, b.head, b.tail) : Infinity }))
-      .sort((a, b) => a.d - b.d).slice(0, 4).filter(x => Number.isFinite(x.d));
+    const d = rig.bones.map((b, id) => ({ id, f: inf(i, id), d: distSeg(px, py, pz, b.head, b.tail) }))
+      .filter(x => x.f > 0).sort((a, b) => a.d - b.d).slice(0, 4);
     let sum = 0;
-    const inv = d.map(x => { const v = 1 / (x.d + 0.015) ** 3; sum += v; return v; });
+    const inv = d.map(x => { const v = x.f / (x.d + 0.015) ** 3; sum += v; return v; });
     d.forEach((x, k) => { w[i * nb + x.id] = inv[k] / sum; });
     if (!d.length) w[i * nb] = 1; // root
   }
   let cur = w;
   if (smooth) {
-    // Blur weights over a spatial hash (stands in for k-NN graph smoothing), then re-apply eligibility so
+    // Blur weights over a spatial hash (stands in for k-NN graph smoothing), then re-apply influence so
     // smoothing never reintroduces cross-limb weights.
     const cell = 0.03, ck = (x: number, y: number, z: number) => `${x},${y},${z}`;
     const cells = new Map<string, { sum: Float32Array; n: number }>();
@@ -268,7 +270,7 @@ export function skinWeights(g: Gaussians, rig: Rig, smooth = true): Uint8Array {
       }
       let s = 0;
       for (let k = 0; k < nb; k++) {
-        const v = ok(i, k) ? 0.5 * w[i * nb + k] + 0.5 * acc[k] / cnt : 0;
+        const v = (0.5 * w[i * nb + k] + 0.5 * acc[k] / cnt) * inf(i, k);
         cur[i * nb + k] = v; s += v;
       }
       if (s > 0) for (let k = 0; k < nb; k++) cur[i * nb + k] /= s; else cur[i * nb] = 1;

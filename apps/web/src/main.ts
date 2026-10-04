@@ -16,7 +16,8 @@ engine.onFrame = t => {
 };
 
 engine.mount(document.getElementById('pet') as HTMLCanvasElement, document.getElementById('peek') as HTMLCanvasElement);
-const bundle: PetBundle = await fetch(`/bundles/${species}/bundle.json`).then(r => r.json());
+const bundleId = new URLSearchParams(location.search).get('bundle') ?? species; // e.g. ?bundle=golden (baked with pnpm bake)
+const bundle: PetBundle = await fetch(`/bundles/${bundleId}/bundle.json`).then(r => r.json());
 if (new URLSearchParams(location.search).has('pipeline')) {
   // Dev check: run the dog/bird test splat back through cleanup -> rig fit -> skin weights, then render that.
   const raw = decodeSplat(await fetch(bundle.splatUrl).then(r => r.arrayBuffer()));
