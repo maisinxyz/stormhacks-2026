@@ -3,3 +3,8 @@ dist/
 *.tsbuildinfo
 .DS_Store
 .playwright-mcp/
+.vercel/
+dist-vercel/
+
+.vercel
+.env*

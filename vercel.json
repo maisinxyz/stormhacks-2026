@@ -1,0 +1,24 @@
+{
+  "buildCommand": "node scripts/vercel-build.mjs",
+  "outputDirectory": "dist-vercel",
+  "functions": {
+    "api/index.js": { "maxDuration": 300, "includeFiles": "apps/web/public/bundles/**" }
+  },
+  "rewrites": [
+    { "source": "/session/:path*", "destination": "/api" },
+    { "source": "/session", "destination": "/api" },
+    { "source": "/agent/:path*", "destination": "/api" },
+    { "source": "/pets/:path*", "destination": "/api" },
+    { "source": "/pets", "destination": "/api" },
+    { "source": "/assets/:path*", "destination": "/api" },
+    { "source": "/uploads/:path*", "destination": "/api" },
+    { "source": "/gen/:path*", "destination": "/api" },
+    { "source": "/voice/:path*", "destination": "/api" },
+    { "source": "/mode/:path*", "destination": "/api" },
+    { "source": "/mode", "destination": "/api" },
+    { "source": "/notifications/:path*", "destination": "/api" },
+    { "source": "/auth/:path*", "destination": "/api" },
+    { "source": "/connectors/:path*", "destination": "/api" },
+    { "source": "/health", "destination": "/api" }
+  ]
+}
