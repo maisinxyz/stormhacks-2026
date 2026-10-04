@@ -1,0 +1,16 @@
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    env_file: ../apps/server/.env
+    environment:
+      HOST: 0.0.0.0
+      DATA_DIR: /app/apps/server/data
+    ports:
+      - "3001:3001"
+    volumes:
+      - fetch-data:/app/apps/server/data
+    restart: unless-stopped
+volumes:
+  fetch-data:

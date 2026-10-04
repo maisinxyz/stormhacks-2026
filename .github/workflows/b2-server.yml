@@ -1,0 +1,24 @@
+name: B2 server
+on:
+  push:
+    paths: ['apps/server/**', 'apps/web/public/bundles/**', 'apps/web/src/engine/pipeline/**', 'packages/contracts/**', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'infra/**', '.github/workflows/b2-server.yml']
+  pull_request:
+    paths: ['apps/server/**', 'apps/web/public/bundles/**', 'apps/web/src/engine/pipeline/**', 'packages/contracts/**', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'infra/**', '.github/workflows/b2-server.yml']
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '12.9.1'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm --filter @fetch/server... install --frozen-lockfile
+      - run: pnpm --filter @fetch/server typecheck
+      - run: pnpm --filter @fetch/server test
+      - run: pnpm --filter @fetch/server build
+      - run: pnpm --filter @fetch/server test:smoke
