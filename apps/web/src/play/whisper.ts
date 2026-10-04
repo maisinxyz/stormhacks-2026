@@ -1,8 +1,10 @@
-// On-device speech recognition for the Play shell: Whisper (tiny, English) running in the browser through
+// On-device speech recognition for the Play shell: Whisper (base, English) running in the browser through
 // transformers.js. It needs no key, no server and no Google/Apple speech service, so voice works in Brave, in a
-// WebView, and behind a VPN. The model (about 40 MB) downloads once, on first use, then lives in the browser cache.
-// ponytail: runs on the CPU (WASM) so it works everywhere; about 1-2 s for a short phrase on a laptop, slower on an
-// iPhone. WebGPU would be faster where it exists.
+// WebView, and behind a VPN. The model (about 80 MB) downloads once, on first use, then lives in the browser cache.
+// Measured on 40 synthetic clips (2 voices, one accented): tiny.en picked the right command 29 times, base.en 33, at about
+// twice the time per clip. It is only the fallback: when the browser's own recognizer answers, that is used instead.
+// ponytail: runs on the CPU (WASM) so it works everywhere; about 2-4 s for a short phrase on a laptop, slower on an
+// iPhone. WebGPU timed out in a headless test; try it on real hardware before switching.
 type Run = (audio: Float32Array) => Promise<{ text: string } | { text: string }[]>;
 
 let loading: Promise<Run> | undefined;
@@ -13,7 +15,7 @@ export function loadWhisper(onProgress?: (pct: number) => void): Promise<Run> {
   loading ??= import('@huggingface/transformers').then(async ({ pipeline, env }) => {
     env.allowLocalModels = false; // models come from the Hugging Face hub (then the browser cache)
     const files = new Map<string, number>();
-    const asr = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+    const asr = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base.en', {
       dtype: 'q8',
       progress_callback: (e: { status: string; file?: string; progress?: number }) => {
         if (e.status === 'progress' && e.file) { files.set(e.file, e.progress ?? 0); onProgress?.([...files.values()].reduce((a, b) => a + b, 0) / files.size); }

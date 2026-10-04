@@ -21,8 +21,8 @@ const TAIL_MS = 300;                // a manual stop keeps recording this much l
 export type VoiceState = 'idle' | 'listening' | 'interpreting';
 
 /** Tap to start, tap again to stop (it also stops by itself when you finish speaking). Two recognizers run side by side:
- *  the browser's own (fast, needs Google/Apple's service) and Whisper on the device (works anywhere). A phrase that
- *  parses as a command wins immediately, otherwise the Whisper text is used. Each turn yields at most one result. */
+ *  the browser's own (accurate, needs Google/Apple's service) and Whisper on the device (works anywhere, less accurate).
+ *  The browser's words are used whenever it heard something; Whisper is the fallback. Each turn yields at most one result. */
 export class PushToTalk {
   private rec?: Recognition;
   private heard = '';
@@ -55,10 +55,10 @@ export class PushToTalk {
       // for each stretch of speech take the alternative that is the clearest command, then join the stretches
       const parts = Array.from(e.results).map(res => interpretBest(Array.from(res as ArrayLike<{ transcript: string }>, a => a.transcript)).text);
       this.heard = parts.join(' ');
-      if (this.state === 'listening' && this.heard) this.offer(this.heard, this.turn, false, true);
+      if (this.state === 'listening' && this.heard) this.offer(this.heard, this.turn, 'partial');
     };
     r.onerror = e => { if (e.error !== 'aborted' && e.error !== 'no-speech') this.browserFailed = e.error; };
-    r.onend = () => { this.browserText = this.heard; this.heard = ''; if (this.browserText) this.offer(this.browserText, this.turn, false); };
+    r.onend = () => { this.browserText = this.heard; this.heard = ''; if (this.browserText) this.offer(this.browserText, this.turn, 'final'); };
   }
 
   get listening() { return this.state === 'listening'; }
@@ -67,7 +67,7 @@ export class PushToTalk {
   /** Download the Whisper model in the background so the first command does not wait for it. */
   warm() {
     if (typeof MediaRecorder === 'undefined') return;
-    this.onStatus('Getting voice ready (one-time, about 40 MB)...');
+    this.onStatus('Getting voice ready (one-time, about 80 MB)...');
     loadWhisper(p => this.onStatus(`Getting voice ready... ${Math.round(p)}%`)).then(() => this.onStatus('Voice is ready. Tap the mic and speak.'), () => { /* retried on the first command */ });
   }
 
@@ -138,8 +138,9 @@ export class PushToTalk {
       const peak = pcm.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
       if (peak < 0.004 || rms(pcm) < 0.0007) return this.fallback(turn);  // only room noise
       const g = Math.min(30, 0.9 / peak); pcm = pcm.map(v => v * g);        // normalise: a quiet mic is not a different transcript
+      if (this.done || turn !== this.turn) return; // the browser's recognizer already answered
       const text = await transcribe(pcm);
-      if (text) this.offer(text, turn, true);
+      if (text) this.offer(text, turn, 'whisper');
       else this.fallback(turn);
     } catch (err) {
       console.warn('whisper failed', err);
@@ -147,15 +148,21 @@ export class PushToTalk {
     }
   }
 
-  /** Deliver a transcript once per turn: a recognised command at once, anything else only from Whisper. */
-  private offer(text: string, turn: number, fromWhisper: boolean, early = false) {
+  /** Deliver a transcript once per turn. The browser's recognizer (Google/Apple, a large model) is trusted over the small
+   *  on-device Whisper, which mishears short phrases: Whisper only decides when the browser heard nothing, or when
+   *  Whisper's words are a command and the browser's are not.
+   *  - partial (still speaking): act only on a clear command.
+   *  - final (the browser finished): act on anything that is a command; other words wait for Whisper's opinion.
+   *  - whisper: pick the better of the two transcripts. */
+  private offer(text: string, turn: number, from: 'partial' | 'final' | 'whisper') {
     if (turn !== this.turn || this.done) return;
-    // a clear command from the fast recognizer needs no second opinion
-    if ((interpret(text)?.score ?? 0) >= SURE || fromWhisper) {
-      this.done = true;
-      if (early) this.cut(); // heard it while the user was still speaking: stop listening now
-      this.set('idle'); this.onText(text);
-    }
+    const score = (t: string) => interpret(t)?.score ?? 0, mine = score(text);
+    if (from === 'partial' && mine < SURE) return;
+    if (from === 'final' && mine === 0) return;
+    if (from === 'whisper' && this.browserText && score(this.browserText) >= mine) text = this.browserText;
+    this.done = true;
+    if (this.state === 'listening' || from !== 'whisper') this.cut(); // understood before the recording was needed: stop it now
+    this.set('idle'); this.onText(text);
   }
 
   /** Stop listening without interpreting (the command was already understood). */
