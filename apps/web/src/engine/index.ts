@@ -17,6 +17,7 @@ import type { RoomCollider } from '../play/scene';
 
 export type Quality = 'high' | 'low';
 const BUDGET: Record<Quality, number> = { high: 300_000, low: 120_000 };
+const DESK_PET_SCALE = 0.72;
 
 // Ray vs capsule (segment + radius): true if the closest distance between the ray and the segment <= r.
 function rayHitsCapsule(o: THREE.Vector3, d: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3, r: number) {
@@ -71,7 +72,7 @@ export class Engine implements PetEngine {
   /** Turn the idle pose toward +x (1) or -x (-1); the walk cycle sets this on its own while travelling. */
   facePet(sign: 1 | -1) { this.beh?.face(sign); }
   private shadowSize = new THREE.Vector2(1, 1); // body footprint (x width, z length) relative to the 1.2 m decal
-  private petScale = 1;
+  private petScale = DESK_PET_SCALE;
   private overlay?: THREE.Scene;
   private claimedGestures = new Set<number>();
   private furnitureSpots: FurnitureSpot[] = [];
@@ -581,7 +582,7 @@ export class Engine implements PetEngine {
 
   // --- PetEngine surface; F1 slice 0-5h implements loading/skinning only. TODOs land in later slices. ---
   setMode(mode: Mode) { this.mode = mode; this.beh?.setMode(mode); }
-  setView(v: 'desk' | 'room' | 'camera', opts?: { petScale?: number }) { this.view = v; this.petScale = opts?.petScale ?? (v === 'room' ? 0.55 : v === 'camera' ? 0.45 : 1); this.setGroundPlane(v === 'desk' ? 0 : this.groundPlane); }
+  setView(v: 'desk' | 'room' | 'camera', opts?: { petScale?: number }) { this.view = v; this.petScale = opts?.petScale ?? (v === 'room' ? 0.55 : v === 'camera' ? 0.45 : DESK_PET_SCALE); this.setGroundPlane(v === 'desk' ? 0 : this.groundPlane); }
   setExternalCamera(on: boolean) { this.externalCamera = on; }
   private pointerInput = true;
   /** false = the engine ignores the pointer (no pet drag, poke or stroke): the first-person room handles input itself. */

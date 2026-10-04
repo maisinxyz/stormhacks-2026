@@ -5,7 +5,9 @@ import { resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const pm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 const apps = [
-  { name: 'Server', port: 3001, cwd: resolve(root, 'apps/server') },
+  // Do not use tsx watch for the combined stack: it watches the pnpm virtual
+  // store and can restart the API continuously while dependencies are loaded.
+  { name: 'Server', port: 3001, cwd: resolve(root, 'apps/server'), command: ['run', 'start'] },
   { name: 'Play', port: 5174, cwd: resolve(root, 'apps/web') },
   { name: 'Desk', port: 5173, cwd: resolve(root, 'apps/desk') },
 ]
@@ -22,7 +24,7 @@ for (const app of apps) {
     console.log(`${app.name} is already running on http://localhost:${app.port}; reusing it.`)
     continue
   }
-  children.push(spawn(pm, ['run', 'dev'], { cwd: app.cwd, stdio: 'inherit', shell: process.platform === 'win32' }))
+  children.push(spawn(pm, app.command ?? ['run', 'dev'], { cwd: app.cwd, stdio: 'inherit', shell: process.platform === 'win32' }))
 }
 
 let shuttingDown = false

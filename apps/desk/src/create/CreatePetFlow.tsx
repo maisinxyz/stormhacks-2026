@@ -149,7 +149,9 @@ export function CreatePetFlow({ engine, serverStatus, onCreated, onFinished, onC
     } finally { running.current = false }
   }
 
-  const offline = serverStatus === 'offline'
+  // Known/sample pets are bundled in the client, so they can still be created when
+  // the persistence service is unavailable. Custom photos still need the server.
+  const offline = serverStatus === 'offline' && !matched
   const stepNo = step === 'species' ? 1 : step === 'input' ? 2 : 3
 
   return <div className="modal-backdrop"><section className="onboarding cp" role="dialog" aria-modal="true" aria-labelledby="cp-title">
@@ -190,7 +192,7 @@ export function CreatePetFlow({ engine, serverStatus, onCreated, onFinished, onC
       </div>
 
       <div className="name-field"><label htmlFor="pet-name">What should we call them?</label><input id="pet-name" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder={`e.g. ${matched?.name || SPECIES.find((s) => s.id === species)!.defaultName}`} /></div>
-      {offline && <p className="cp-banner" role="status">The Fetch server is offline. Start it with "pnpm dev" in apps/server to create pets.</p>}
+      {offline && <p className="cp-banner" role="status">Custom photo creation needs the Fetch service. Choose a sample pet to continue offline.</p>}
       <div className="modal-actions"><button className="text-button" onClick={() => setStep('species')}>Back</button><button type="button" className="text-button" onClick={onClose} style={{ marginLeft: 'auto', marginRight: '8px' }}>Explore Desk</button><button className="primary-button compact" disabled={!image || offline || samplePending} onClick={() => void run()}>Create {petName} <Sparkles size={16} /></button></div>
     </>}
 

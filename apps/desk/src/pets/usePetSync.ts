@@ -32,6 +32,11 @@ export function usePetSync(store: PetStore) {
   }, [setPets])
 
   useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    if (status !== 'offline') return
+    const retry = window.setInterval(() => { void refresh() }, 3000)
+    return () => window.clearInterval(retry)
+  }, [refresh, status])
 
   const select = useCallback((id: string) => {
     selectPet(id)
