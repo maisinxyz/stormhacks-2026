@@ -2,12 +2,19 @@
 // Every connector tool runs through the runner, which owns events, retries, and approval gating.
 import { z } from 'zod';
 import type { Verb } from '@fetch/contracts';
+import type { ComposioGateway, ConnectionRequest } from '../connectors/composio';
 import type { Connectors } from '../connectors/types';
 import type { ApprovalKind, ApprovalPreview } from './types';
 
 export interface ToolContext {
+  /** Native Google (or MOCK_CONNECTORS) connectors; only set for tools with connector 'google'. */
   connectors: Connectors;
+  /** Set for tools with connector 'composio'. */
+  composio?: ComposioGateway;
+  userId: string;
   progress(note: string, itemsRead?: number): void;
+  /** Pauses the run with a connect card until the account is active. Throws (ending the run) if declined. */
+  awaitConnection(toolkit: { slug: string; name: string }, req: ConnectionRequest): Promise<void>;
 }
 export interface ToolOutput { data: unknown; undo?: Record<string, unknown> }
 export interface ApprovalSpec { kind: ApprovalKind; preview: ApprovalPreview }
@@ -22,9 +29,12 @@ export interface ToolDef<I = any> {
   verb: (input: I) => Verb;
   label: (input: I) => string;
   policy: Policy;
+  /** Which backend the tool needs. Defaults to 'google' (native Google, or MOCK_CONNECTORS). */
+  connector?: 'google' | 'composio';
   /** Non-null means the call is held for human approval; the stored input is what executes. */
-  approval?: (input: I) => ApprovalSpec | null;
-  /** Replaces model-supplied display fields with server truth before an approval preview is built. */
+  approval?: (input: I, t: ToolContext) => ApprovalSpec | null | Promise<ApprovalSpec | null>;
+  /** Runs before the approval check: replaces model-supplied display fields with server truth,
+   *  and may connect accounts the call needs. */
   prepare?: (input: I, t: ToolContext) => Promise<I>;
   run(input: I, t: ToolContext): Promise<ToolOutput>;
 }

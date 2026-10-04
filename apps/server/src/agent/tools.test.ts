@@ -5,7 +5,7 @@ import { TOOL_BY_NAME, TOOLS, apiName, type ToolContext } from './tools';
 
 const ctx = (ws = new MockWorkspace()): ToolContext & { notes: string[] } => {
   const notes: string[] = [];
-  return { connectors: ws, notes, progress: (n) => notes.push(n) };
+  return { connectors: ws, notes, userId: 'u', progress: (n) => { notes.push(n); }, awaitConnection: async () => {} };
 };
 const run = (name: string, input: unknown, t = ctx()) => {
   const def = TOOL_BY_NAME.get(name)!;
@@ -19,7 +19,7 @@ describe('tool registry', () => {
     for (const n of names) expect(n).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
   });
 
-  it('every outbound tool requires approval for any valid input', () => {
+  it('every outbound tool requires approval for any valid input', async () => {
     const samples: Record<string, unknown> = {
       'gmail.send': { to: ['a@b.co'], subject: 's', body: 'b' },
       'drive.trash': { fileId: 'f', fileName: 'n' },
@@ -27,16 +27,16 @@ describe('tool registry', () => {
     };
     const outbound = TOOLS.filter(t => t.policy === 'outbound');
     expect(outbound.map(t => t.name).sort()).toEqual(Object.keys(samples).sort());
-    for (const t of outbound) expect(t.approval?.(t.input.parse(samples[t.name]))).toBeTruthy();
+    for (const t of outbound) expect(await t.approval?.(t.input.parse(samples[t.name]), ctx())).toBeTruthy();
   });
 
-  it('calendar invites with attendees need approval and tag SEND; solo events do not', () => {
+  it('calendar invites with attendees need approval and tag SEND; solo events do not', async () => {
     const create = TOOL_BY_NAME.get('calendar.create')!;
     const base = { title: 'Focus', start: '2026-10-04T10:00:00Z', end: '2026-10-04T11:00:00Z' };
-    expect(create.approval!(create.input.parse(base))).toBeNull();
+    expect(await create.approval!(create.input.parse(base), ctx())).toBeNull();
     expect(create.verb(create.input.parse(base))).toBe('WRITE');
     const invite = create.input.parse({ ...base, attendees: ['a@b.co'] });
-    expect(create.approval!(invite)?.kind).toBe('calendar_invite');
+    expect((await create.approval!(invite, ctx()))?.kind).toBe('calendar_invite');
     expect(create.verb(invite)).toBe('SEND');
   });
 

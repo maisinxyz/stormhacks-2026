@@ -3,12 +3,14 @@
 import { randomBytes } from 'node:crypto';
 import type { ActionStep, Mood } from '@fetch/contracts';
 import { connectorsFor } from '../connectors';
-import { ConnectorError } from '../connectors/types';
+import type { ConnectionRequest } from '../connectors/composio';
+import { ConnectorError, type Connectors } from '../connectors/types';
 import { ApprovalGate, contentHash } from './approvals';
 import { FINISH_TOOL, FinishInput, PLAN_TOOL, PlanInput, type Brain, type ToolCall, type ToolResultMsg } from './brain';
 import type { B1Context } from './context';
 import type { RunHub } from './hub';
-import { DEFAULT_PROP, PRESET_PROPS, TOOL_BY_API_NAME, type ToolDef } from './tools';
+import { DEFAULT_PROP, PRESET_PROPS, type ApprovalSpec, type ToolContext, type ToolDef } from './tools';
+import { byApiName, CONNECT_TOOL } from './toolset';
 import type { Approval, Run, RunEvent, User } from './types';
 
 export const newId = (prefix: string) => `${prefix}_${randomBytes(8).toString('hex')}`;
@@ -79,6 +81,8 @@ class RunExecution {
   private ended = false;
   /** stepId -> requested non-preset prop, awaiting a generated sticker. */
   private wantedProps = new Map<string, string>();
+  private get tools() { return (this._tools ??= byApiName(this.ctx.tools)); }
+  private _tools?: Map<string, ToolDef>;
 
   constructor(
     private ctx: B1Context, private hub: RunHub, private gate: ApprovalGate, private brain: Brain,
@@ -167,7 +171,7 @@ class RunExecution {
   /** The brain called tools without planning first: derive the plan from the calls. */
   private async autoPlan(calls: ToolCall[]) {
     this.steps = calls.map((c, i) => {
-      const def = TOOL_BY_API_NAME.get(c.name);
+      const def = this.tools.get(c.name);
       const input = def?.input.safeParse(stripStepId(c.input));
       const verb = def && input?.success ? def.verb(input.data) : 'WAIT';
       const label = def && input?.success ? def.label(input.data) : 'Working on it';
@@ -223,7 +227,7 @@ class RunExecution {
   // ---- tools --------------------------------------------------------------------------------
 
   private async handleTool(call: ToolCall): Promise<ToolResultMsg> {
-    const def = TOOL_BY_API_NAME.get(call.name);
+    const def = this.tools.get(call.name);
     if (!def) return { id: call.id, isError: true, content: `Unknown tool ${call.name}` };
     const parsed = def.input.safeParse(stripStepId(call.input));
     if (!parsed.success) return { id: call.id, isError: true, content: `Invalid input for ${def.name}: ${parsed.error.message}` };
@@ -233,14 +237,18 @@ class RunExecution {
     const step = await this.findOrAddStep(call.input.stepId, def, input);
     step.toolCallId = call.id;
 
-    let connectors;
+    let connectors: Connectors | undefined;
     if (def.policy !== 'meta') {
       // Mode is re-checked on every connector call, so a mid-run switch to Play stops the errand.
       if ((await this.ctx.store.getUserState(this.user.id)).mode !== 'work') throw new ConnectorError('mode_forbidden', 'Play mode');
-      try { connectors = await connectorsFor(this.ctx, this.user.id); }
-      catch (err) {
-        if (err instanceof ConnectorError) return { id: call.id, isError: true, content: err.message };
-        throw err;
+      if (def.connector === 'composio') {
+        if (!this.ctx.composio) return { id: call.id, isError: true, content: 'App tools are not configured on this server.' };
+      } else {
+        try { connectors = await connectorsFor(this.ctx, this.user.id); }
+        catch (err) {
+          if (err instanceof ConnectorError) return { id: call.id, isError: true, content: err.message };
+          throw err;
+        }
       }
     }
 
@@ -248,29 +256,34 @@ class RunExecution {
 
     // Progress from an attempt that timed out (and was superseded or ended the run) is dropped.
     let currentAttempt = 0;
-    const tctxFor = (attempt: number) => ({
+    const tctxFor = (attempt: number): ToolContext => ({
       connectors: connectors!,
+      composio: this.ctx.composio,
+      userId: this.user.id,
       progress: (note: string, itemsRead?: number) => {
         if (attempt !== currentAttempt || this.ended) return;
         this.emit({ type: 'tool.progress', stepId: step.id, note, ...(itemsRead !== undefined && { itemsRead }) }).catch(logError);
       },
+      awaitConnection: (toolkit, req) => this.awaitConnection(step, toolkit, req),
     });
+    const failed = async (err: unknown, fallback: string): Promise<ToolResultMsg> => {
+      if (err instanceof RunEnded || this.signal.aborted) throw new RunEnded();
+      await this.emit({ type: 'tool.end', stepId: step.id, ok: false });
+      return { id: call.id, isError: true, content: err instanceof ConnectorError ? `${err.code}: ${err.message}` : fallback };
+    };
 
+    // prepare may pause for an app connection, so it gets the approval TTL rather than the tool timeout.
     let payload = input;
-    let spec = def.approval?.(input);
+    let spec: ApprovalSpec | null | undefined;
+    try {
+      if (def.prepare) payload = await withTimeout(def.prepare(input, tctxFor(-1)), this.ctx.config.toolTimeoutMs + this.ctx.config.approvalTtlMs, this.signal);
+      spec = await withTimeout(Promise.resolve(def.approval?.(payload, tctxFor(-1))), this.ctx.config.toolTimeoutMs, this.signal);
+    } catch (err) { return failed(err, 'Lookup failed.'); }
     if (spec) {
-      if (def.prepare) {
-        try { payload = await withTimeout(def.prepare(input, tctxFor(-1)), this.ctx.config.toolTimeoutMs, this.signal); }
-        catch (err) {
-          if (err instanceof RunEnded || this.signal.aborted) throw new RunEnded();
-          await this.emit({ type: 'tool.end', stepId: step.id, ok: false });
-          return { id: call.id, isError: true, content: err instanceof ConnectorError ? `${err.code}: ${err.message}` : 'Lookup failed.' };
-        }
-        spec = def.approval!(payload)!;
-      }
-      const approved = await this.awaitApproval(step, def, payload, spec);
+      const approved = await this.awaitHuman(step, def.name, spec, payload, 'Okay, I won\'t do that.');
       if (!approved) throw new RunEnded('denied');   // run already ended with a sheepish result
-      payload = approved.payload;
+      // Execute the stored payload (re-validated), never anything the model regenerates.
+      payload = def.input.parse(approved.payload);
     }
 
     // Anything that needed approval runs exactly once: a timeout may still have delivered it.
@@ -299,21 +312,27 @@ class RunExecution {
     }
   }
 
-  /** Stores the exact payload, emits approval.required, and pauses until a human decides. */
-  private async awaitApproval(step: ActionStep, def: ToolDef, input: unknown, spec: NonNullable<ReturnType<NonNullable<ToolDef['approval']>>>) {
+  /**
+   * Stores the exact payload, emits approval.required, and pauses until a human decides.
+   * Returns the approved record, or undefined after ending the run with a sheepish result.
+   * `onPending` lets the caller resolve the approval itself (used by connect cards).
+   */
+  private async awaitHuman(step: ActionStep, tool: string, spec: ApprovalSpec, input: unknown, declined: string,
+                           onPending?: (actionId: string) => void): Promise<Approval | undefined> {
     const actionId = newId('act');
     const payload = JSON.parse(JSON.stringify(input)) as Record<string, unknown>;
     const now = Date.now();
     const approval: Approval = {
-      actionId, runId: this.run.id, userId: this.user.id, stepId: step.id, tool: def.name, kind: spec.kind,
-      payload, preview: spec.preview, contentHash: contentHash(this.run.id, actionId, def.name, payload),
+      actionId, runId: this.run.id, userId: this.user.id, stepId: step.id, tool, kind: spec.kind,
+      payload, preview: spec.preview, contentHash: contentHash(this.run.id, actionId, tool, payload),
       status: 'pending', createdAt: new Date(now).toISOString(), expiresAt: new Date(now + this.ctx.config.approvalTtlMs).toISOString(),
     };
     await this.ctx.store.createApproval(approval);
     await this.ctx.store.updateRun(this.run.id, { status: 'awaiting_approval' });
     const waiting = this.gate.wait(this.run.id, actionId, this.ctx.config.approvalTtlMs, this.signal);
     await this.emit({ type: 'approval.required', actionId, kind: spec.kind, preview: spec.preview, contentHash: approval.contentHash });
-    this.log('approval required', { tool: def.name, actionId });
+    this.log('approval required', { tool, actionId });
+    onPending?.(actionId);
 
     const d = await waiting;
     if (d.decision === 'approved') {
@@ -321,17 +340,46 @@ class RunExecution {
       if (stored && stored.runId === this.run.id && stored.status === 'approved') {
         await this.ctx.store.updateRun(this.run.id, { status: 'running' });
         this.log('approval granted', { actionId: d.actionId });
-        // Execute the stored payload (re-validated), never anything the model regenerates.
-        return { payload: def.input.parse(stored.payload) };
+        return stored;
       }
     }
     // Close out whichever approval was pending (an edit may have replaced the original).
     await this.ctx.store.transitionApproval(d.actionId, 'pending', d.decision === 'expired' ? 'expired' : 'denied');
     await this.emit({ type: 'tool.end', stepId: step.id, ok: false });
-    const why = d.decision === 'expired' ? 'The approval expired, so I didn\'t do it.' : 'Okay, I won\'t do that.';
+    const why = d.decision === 'expired' ? 'That waited too long, so I stopped.' : declined;
     await this.emit({ type: 'run.say', text: clampSay(why) });
     await this.end('denied', { type: 'run.result', summary: `${why} Nothing was sent or changed.`, mood: 'sheepish' });
     return undefined;
+  }
+
+  /**
+   * Connect card: the run pauses on an approval whose preview carries the app's sign-in link.
+   * It resolves on its own as soon as Composio reports the account active (or via /approve once
+   * connected); cancel or expiry ends the run like a declined approval.
+   */
+  private async awaitConnection(step: ActionStep, toolkit: { slug: string; name: string }, req: ConnectionRequest) {
+    await this.emit({ type: 'run.say', text: clampSay(`I need access to ${toolkit.name} first. Tap the link to connect it!`) });
+    const spec: ApprovalSpec = {
+      kind: 'other',
+      preview: {
+        summary: `Connect ${toolkit.name} so I can finish this. Open the link, sign in, and I'll continue on my own.`,
+        body: req.redirectUrl,
+      },
+    };
+    // Stops the background connection poll however the card resolves (connected, cancelled, expired).
+    const stopPolling = new AbortController();
+    const approved = await this.awaitHuman(step, CONNECT_TOOL, spec, { toolkit: toolkit.slug, redirectUrl: req.redirectUrl },
+      `Okay, I won't connect ${toolkit.name}.`,
+      (actionId) => {
+        req.wait(this.ctx.config.approvalTtlMs, stopPolling.signal)
+          .then(async () => {
+            if (await this.ctx.store.transitionApproval(actionId, 'pending', 'approved')) this.gate.resolve(this.run.id, { decision: 'approved' });
+          })
+          .catch(() => { /* timeout/abort: the gate's own expiry or the user's cancel ends the wait */ });
+      }).finally(() => stopPolling.abort());
+    if (!approved) throw new RunEnded('denied');
+    this.log('app connected', { toolkit: toolkit.slug });
+    await this.emit({ type: 'tool.progress', stepId: step.id, note: `Connected ${toolkit.name}` });
   }
 
   // ---- finish -------------------------------------------------------------------------------

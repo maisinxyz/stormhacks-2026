@@ -2,8 +2,8 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { connectorStatus, setMode, type B1Context } from '../agent/context';
-import { authUrl, completeOAuth, googleConfigured, revokeGoogle, CONNECTOR_NAMES } from './google';
+import { COMPOSIO_SLUG, connectedApps, connectorStatus, setMode, type B1Context } from '../agent/context';
+import { authUrl, completeOAuth, googleConfigured, revokeGoogle, CONNECTOR_NAMES, type ConnectorName } from './google';
 import { requireUser, setUserCookie } from './requireUser';
 
 const STATE_COOKIE = 'fetch_oauth_state';
@@ -24,6 +24,9 @@ export async function authRoutes(app: FastifyInstance, ctx: B1Context) {
       activePetId: state.activePetId ?? null,
       mock: { agent: ctx.config.mockAgent, connectors: ctx.config.mockConnectors },
       googleConfigured: googleConfigured(ctx.config),
+      /** Composio: every connected app slug (any app works; others connect on first use). */
+      apps: await connectedApps(ctx, user.id),
+      composio: Boolean(ctx.composio),
     };
   });
 
@@ -78,9 +81,17 @@ export async function authRoutes(app: FastifyInstance, ctx: B1Context) {
     }
   });
 
-  // One Google grant backs all three connectors, so disconnecting any of them revokes the grant.
+  // With Composio, each app is its own connection: :name is gmail|calendar|drive or any Composio app slug.
+  // Without it, one Google grant backs all three connectors, so disconnecting any of them revokes the grant.
   app.delete('/connectors/:name', { preHandler: auth }, async (req, reply) => {
     const { name } = req.params as { name: string };
+    if (ctx.composio) {
+      if (!/^[a-z0-9_-]{2,60}$/.test(name)) return reply.code(404).send({ error: 'unknown_connector' });
+      const slug = COMPOSIO_SLUG[name as ConnectorName] ?? name;
+      try { await ctx.composio.disconnect(req.user!.id, slug); }
+      catch { return reply.code(502).send({ error: 'disconnect_failed' }); }
+      return { disconnected: [slug], connected: await connectorStatus(ctx, req.user!.id), apps: await connectedApps(ctx, req.user!.id) };
+    }
     if (name !== 'google' && !CONNECTOR_NAMES.includes(name as never)) return reply.code(404).send({ error: 'unknown_connector' });
     await revokeGoogle(ctx.config, ctx.store, ctx.tokenKey, req.user!.id);
     return { disconnected: CONNECTOR_NAMES, connected: await connectorStatus(ctx, req.user!.id) };

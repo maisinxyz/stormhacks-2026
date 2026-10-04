@@ -11,6 +11,7 @@ export interface B1Config {
   tokenEncKey: string;          // base64, 32 bytes
   google: { clientId?: string; clientSecret?: string; redirectUri: string };
   webOrigin: string;            // where /auth/google/callback redirects back to
+  composio: { apiKey?: string; callbackUrl: string };
   agentModel: string;
   toolTimeoutMs: number;
   maxSteps: number;
@@ -34,6 +35,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): B1Config {
       redirectUri: env.GOOGLE_REDIRECT_URI ?? 'http://localhost:8787/auth/google/callback',
     },
     webOrigin: env.WEB_ORIGIN ?? 'http://localhost:5173',
+    composio: {
+      apiKey: env.COMPOSIO_API_KEY || undefined,
+      // Where the browser lands after finishing an app's sign-in.
+      callbackUrl: env.COMPOSIO_CALLBACK_URL ?? `${env.WEB_ORIGIN ?? 'http://localhost:5173'}/?connected=app`,
+    },
     agentModel: env.AGENT_MODEL ?? 'claude-opus-5-5',
     toolTimeoutMs: Number(env.TOOL_TIMEOUT_MS ?? 30_000),
     maxSteps: Number(env.AGENT_MAX_STEPS ?? 15),

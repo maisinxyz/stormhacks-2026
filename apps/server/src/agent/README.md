@@ -51,6 +51,28 @@ await registerB1(app, { pets: PetsRepo, media });   // PRD B2.3 interfaces
 Event guarantees: `run.plan` comes before any `tool.*`, and every `tool.*` `stepId` is in the latest `run.plan`. The plan is
 re-emitted when steps are added or a generated prop sticker arrives. `run.say` is ≤ 15 words.
 
+## Any app via Composio
+
+Set `COMPOSIO_API_KEY` in `apps/server/.env` (gitignored) and the agent can work in any app Composio supports: Gmail,
+Google Drive/Calendar/Sheets, Slack, GitHub, Notion, Linear, and hundreds more. You don't need a Google OAuth app.
+
+- **Tools:** the agent gets `apps.search` and `apps.execute` instead of the native Google tools.
+  - `apps.search` finds exact tool slugs, their input schemas, and connection status.
+  - `apps.execute` runs the chosen tools in order.
+- **Automatic connect:** if a tool's app isn't connected, the run pauses with `approval.required` (`kind: 'other'`).
+  - The card's `preview.body` is the Composio sign-in link, and `preview.summary` says which app it is.
+  - As soon as the user finishes signing in, the run continues on its own.
+  - Calling `/approve` before the account is connected returns `409 not_connected_yet`. Cancel declines the connection.
+  - **F2:** render `preview.body` as a link when it starts with `https://`.
+- **Approvals:** a call runs automatically only if Composio tags it `readOnlyHint` and not `destructiveHint`.
+  Anything else (send, post, create, update, delete) goes to the normal approval card, whose preview shows the exact
+  tool and arguments that will run. App-tool approvals can't be edited.
+- **`/session` additions:** `composio: true` and `apps: string[]` (connected app slugs). The `connected` chips map to
+  the Composio apps `gmail`, `googlecalendar` and `googledrive`.
+- **Disconnecting:** `DELETE /connectors/:name` accepts `gmail`, `calendar`, `drive`, or any Composio app slug.
+- **Which tools run:** `MOCK_CONNECTORS=1` (or `MOCK_AGENT=1`, whose canned scripts drive the native tools) uses the
+  offline native tools even when a key is set.
+
 ## Config (env)
 
 | Var | Default | |
@@ -59,6 +81,8 @@ re-emitted when steps are added or a generated prop sticker arrives. `run.say` i
 | `MOCK_AGENT_DELAY_MS` | 700 | Pacing between mock agent turns. |
 | `MOCK_NOTIFY_ARRIVAL_MS` | 20000 | Mock "new email" arrival after the notifications stream connects. |
 | `ANTHROPIC_API_KEY` | | Needed for the real agent. |
+| `COMPOSIO_API_KEY` | | Any-app tools with automatic connect (see above). |
+| `COMPOSIO_CALLBACK_URL` | `WEB_ORIGIN/?connected=app` | Where the browser lands after an app sign-in. |
 | `AGENT_MODEL` / `AGENT_EFFORT` | `claude-opus-5-5` / `low` | |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | | OAuth app in test mode, with the demo account as a tester. Redirect: `…/auth/google/callback`. |
 | `WEB_ORIGIN` | `http://localhost:5173` | Where OAuth redirects back to. |
