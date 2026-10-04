@@ -11,16 +11,7 @@ let last = 0, frames = 0, acc = 0;
 
 engine.onFrame = t => {
   frames++; acc += t - last; last = t;
-  if (acc > 1) { fps.textContent = `${(frames / acc).toFixed(0)} fps`; frames = 0; acc = 0; }
-  const s = Math.sin(t * 3);
-  engine.setBoneEuler('tail', 0, s * 0.6, 0);
-  engine.setBoneEuler('head', Math.sin(t * 1.5) * 0.25, Math.sin(t) * 0.3, 0);
-  engine.setBoneEuler('wingL', 0, 0, s * 0.6);
-  engine.setBoneEuler('wingR', 0, 0, -s * 0.6);
-  engine.setBoneEuler('legFL', s * 0.5, 0, 0);
-  engine.setBoneEuler('legBR', s * 0.5, 0, 0);
-  engine.setBoneEuler('legFR', -s * 0.5, 0, 0);
-  engine.setBoneEuler('legBL', -s * 0.5, 0, 0);
+  if (acc > 1) { fps.textContent = `${(frames / acc).toFixed(0)} fps | ${engine.state}`; frames = 0; acc = 0; }
 };
 
 engine.mount(document.getElementById('pet') as HTMLCanvasElement, document.getElementById('peek') as HTMLCanvasElement);
@@ -37,3 +28,38 @@ if (new URLSearchParams(location.search).has('pipeline')) {
 await engine.loadPet(bundle);
 
 (window as unknown as { engine: Engine }).engine = engine;
+
+// ---- dev controls: exercise intents, verbs, a fake errand, approval, modes ----
+const bar = document.createElement('div');
+bar.style.cssText = 'position:fixed;bottom:8px;left:8px;right:8px;display:flex;flex-wrap:wrap;gap:4px;font:12px monospace';
+document.body.appendChild(bar);
+const btn = (label: string, fn: () => void) => { const b = document.createElement('button'); b.textContent = label; b.onclick = fn; bar.appendChild(b); };
+const intents = ['sit', 'stay', 'come', 'speak', 'roll_over', 'spin', 'play_dead', 'shake', 'fetch_ball', 'sleep', 'wake', 'trick', 'dance', 'hide', 'stop'] as const;
+intents.forEach(i => btn(i, () => engine.doIntent(i)));
+const verbs = ['SEARCH', 'FETCH', 'READ', 'WRITE', 'COMPARE', 'ORGANIZE', 'SEND', 'WAIT', 'MONITOR', 'CALCULATE', 'NEGOTIATE', 'SUCCEED', 'FAIL'] as const;
+verbs.forEach(v => btn(v, () => engine.previewVerb(v, 'neutral', 3, { kind: 'preset', name: 'document' })));
+btn('MODE work', () => engine.setMode('work')); btn('MODE play', () => engine.setMode('play'));
+btn('listen on', () => engine.setListening(true)); btn('listen off', () => engine.setListening(false));
+btn('pet', () => engine.react('pet')); btn('poke', () => engine.react('poke'));
+const step = (id: string, verb: (typeof verbs)[number]) => ({ id, verb, mood: 'focused' as const, label: id });
+btn('RUN errand', () => {
+  const steps = [step('s1', 'SEARCH'), step('s2', 'FETCH')];
+  engine.pushToolEvent({ type: 'run.started', runId: 'r1' });
+  engine.pushToolEvent({ type: 'run.plan', steps });
+  setTimeout(() => engine.pushToolEvent({ type: 'tool.start', stepId: 's1', tool: 'drive.search', label: 'Searching' }), 1500);
+  setTimeout(() => engine.pushToolEvent({ type: 'tool.end', stepId: 's1', ok: true }), 3500);
+  setTimeout(() => engine.pushToolEvent({ type: 'run.result', summary: 'found it', mood: 'proud', prop: { kind: 'preset', name: 'document' } }), 5000);
+});
+btn('RUN -> approval', () => {
+  engine.pushToolEvent({ type: 'run.plan', steps: [step('s1', 'WRITE')] });
+  setTimeout(() => { engine.pushToolEvent({ type: 'approval.required', actionId: 'a', kind: 'send_email', preview: { summary: 'x' }, contentHash: 'h' }); engine.setApprovalPending(true); }, 3000);
+});
+btn('approve', () => engine.setApprovalPending(false));
+btn('RUN error', () => {
+  engine.pushToolEvent({ type: 'run.plan', steps: [step('s1', 'SEARCH')] });
+  setTimeout(() => engine.pushToolEvent({ type: 'run.error', code: 'x', message: 'x', mood: 'sheepish' }), 3000);
+});
+engine.setPlatforms([{ id: 'win1', x: innerWidth * 0.55, y: innerHeight * 0.45, w: 260, h: 180, kind: 'window' }]);
+engine.on('PET_AT_PLATFORM', e => console.log('perched', e.platformId));
+engine.on('RETURNED', e => console.log('returned', e.runId));
+engine.on('ANIM_DONE', e => console.log('anim done', e.id));

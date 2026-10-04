@@ -135,7 +135,7 @@ export class SplatMesh {
     this.uniforms.uViewport.value.copy(size);
     const fy = size.y / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
     this.uniforms.uFocal.value.set(fy, fy);
-    const dir = camera.getWorldDirection(new THREE.Vector3());
+    const dir = camera.getWorldDirection(new THREE.Vector3()).transformDirection(this.mesh.matrixWorld.clone().invert()); // sort in model space
     if (dir.distanceTo(this.lastDir) > 0.01) { this.lastDir.copy(dir); this.sort(dir); }
   }
 

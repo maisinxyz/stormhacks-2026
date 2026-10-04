@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { ActionStep, BusEvent, LocalIntent, Mode, Mood, PetBundle, PetEngine, Platform, RunEvent, Species } from '@fetch/contracts';
 import { Bus } from './bus';
 import { generatePet as runPipeline } from './pipeline/generate';
+import { Behavior, type BehaviorHost } from './behavior';
+import { Props, type Prop } from './props';
+import { PACKS, type SpeciesPack } from './species';
 import { MAX_BONES, SplatMesh } from './splatRenderer';
 
 interface Bone { name: string; parent: number; head: [number, number, number]; tail: [number, number, number] }
@@ -26,6 +29,10 @@ export class Engine implements PetEngine {
   private lowSince = 0;
   private boneWorld: THREE.Matrix4[] = [];
   private shadow?: THREE.Mesh;
+  private beh?: Behavior;
+  private pack?: SpeciesPack;
+  private props?: Props;
+  private listeningPending = false;
 
   private bus = new Bus();
   private renderer!: THREE.WebGLRenderer;
@@ -42,10 +49,11 @@ export class Engine implements PetEngine {
   mount(canvas: HTMLCanvasElement, _peekCanvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: false, premultipliedAlpha: true });
     this.renderer.setClearColor(0x000000, 0);
-    this.camera.position.set(1.6, 1.0, 2.4);
+    this.camera.position.set(0, 0.8, 4.5); // near-frontal so screen x maps to world x on the z=0 stage
     this.camera.lookAt(0, 0.5, 0);
     this.shadow = this.makeShadow();
     this.scene.add(this.shadow);
+    this.props = new Props(this.scene);
     canvas.style.pointerEvents = 'none';
     window.addEventListener('pointermove', e => {
       canvas.style.pointerEvents = this.hitTest(e.clientX, e.clientY) ? 'auto' : 'none';
@@ -58,8 +66,11 @@ export class Engine implements PetEngine {
       this.resize();
       this.onFrame?.(t / 1000);
       if (this.splat) {
+        if (this.beh) this.tickBehavior(Math.min(dt, 0.1));
         this.skin();
+        this.splat.mesh.updateMatrixWorld();
         this.splat.update(this.renderer, this.camera);
+        this.props?.update(dt, this.beh && this.splat.mesh.visible ? this.socketWorld() : undefined);
       }
       this.renderer.render(this.scene, this.camera);
     };
@@ -80,7 +91,65 @@ export class Engine implements PetEngine {
     this.splat = new SplatMesh(splat, weights);
     this.splat.setBudget(BUDGET[this.quality]);
     this.scene.add(this.splat.mesh);
+    this.pack = PACKS[b.species];
+    this.beh = new Behavior(this.pack, this.host());
+    this.beh.setMode(this.mode);
+    if (this.listeningPending) this.beh.setListening(true);
   }
+
+  private tickBehavior(dt: number) {
+    const o = this.beh!.update(dt), m = this.splat!.mesh;
+    for (const b of this.bones) this.setBoneEuler(b.name, 0, 0, 0);
+    for (const [n, e] of Object.entries(o.pose.bones)) this.setBoneEuler(n, e[0], e[1], e[2]);
+    m.position.set(o.x, o.y, 0);
+    m.rotation.y = o.yaw;
+    if (this.shadow) { this.shadow.position.set(o.x, this.beh!.y + 0.002, 0); this.shadow.visible = m.visible; }
+  }
+
+  // World position of the species' carry socket (mouth / cheek / talons), from the posed bone.
+  private socketWorld(): THREE.Vector3 | undefined {
+    const c = this.pack!.carry, i = this.bones.findIndex(b => b.name === c.bone);
+    if (i < 0 || !this.boneWorld[i]) return undefined;
+    return new THREE.Vector3(...this.bones[i].tail).add(new THREE.Vector3(...c.offset)).applyMatrix4(this.boneWorld[i]).applyMatrix4(this.splat!.mesh.matrixWorld);
+  }
+
+  // Screen px -> point on the z=0 world plane the pet walks on.
+  private toWorld(px: number, py: number): THREE.Vector3 | undefined {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(((px - r.left) / r.width) * 2 - 1, -((py - r.top) / r.height) * 2 + 1), this.camera);
+    return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), new THREE.Vector3()) ?? undefined;
+  }
+
+  private host(): BehaviorHost {
+    return {
+      bounds: () => {
+        const r = this.renderer.domElement.getBoundingClientRect();
+        const a = this.toWorld(r.left + 4, r.top + r.height / 2), b = this.toWorld(r.right - 4, r.top + r.height / 2);
+        return { xmin: a?.x ?? -2, xmax: b?.x ?? 2 };
+      },
+      platformSpots: () => this.platforms.filter(p => p.kind !== 'edge').flatMap(p => {
+        const w = this.toWorld(p.x + p.w / 2, p.y);
+        return w ? [{ id: p.id, x: w.x, y: Math.max(0, w.y) }] : [];
+      }),
+      setVisible: v => { if (this.splat) this.splat.mesh.visible = v; },
+      emit: e => this.bus.emit(e),
+      burst: (k, x, y) => this.props?.burst(k, new THREE.Vector3(x, y, 0.1)),
+      setCarry: p => this.props?.setCarry(p),
+      setWorldProp: (p, x, y) => this.props?.setWorld(p, x === undefined ? undefined : new THREE.Vector3(x, y ?? 0, 0.2)),
+      peek: e => this.peekEvents.push(e), // TODO 1.9: render in the edge-peek canvas
+    };
+  }
+  /** Run events seen while the pet is off-canvas; the edge-peek scene (1.9) consumes these. */
+  peekEvents: RunEvent[] = [];
+
+  /** F2 signals mic-open/close (not in the frozen BusEvent contract; propose adding a MIC event). */
+  setListening(on: boolean) { this.listeningPending = on; this.beh?.setListening(on); }
+  /** Pointer reactions (PET_STROKE/POKE/FEED are detected in 1.8; this is the reaction half). */
+  react(kind: 'pet' | 'poke' | 'feed') { this.beh?.react(kind); }
+  /** Play a verb's composed animation on the visible pet (peek scene / previews). */
+  previewVerb(v: Parameters<Behavior['previewVerb']>[0], mood: Mood = 'neutral', secs = 3, prop?: Prop) { this.beh?.previewVerb(v, mood, secs, prop); }
+  get state() { return this.beh?.state; }
 
   /** Demo/animation hook: set a bone's local rotation (euler radians) by name. */
   setBoneEuler(name: string, x: number, y: number, z: number) {
@@ -120,6 +189,9 @@ export class Engine implements PetEngine {
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     const ray = new THREE.Raycaster();
     ray.setFromCamera(ndc, this.camera);
+    const inv = this.splat.mesh.matrixWorld.clone().invert(); // bones live in the pet's local space
+    if (!this.splat.mesh.visible) return false;
+    ray.ray.origin.applyMatrix4(inv); ray.ray.direction.transformDirection(inv);
     return this.bones.some((b, i) => {
       const len = new THREE.Vector3(...b.head).distanceTo(new THREE.Vector3(...b.tail));
       const a = new THREE.Vector3(...b.head).applyMatrix4(this.boneWorld[i]), e = new THREE.Vector3(...b.tail).applyMatrix4(this.boneWorld[i]);
@@ -154,13 +226,13 @@ export class Engine implements PetEngine {
   dispose() { cancelAnimationFrame(this.raf); this.renderer.dispose(); }
 
   // --- PetEngine surface; F1 slice 0-5h implements loading/skinning only. TODOs land in later slices. ---
-  setMode(mode: Mode) { this.mode = mode; }
+  setMode(mode: Mode) { this.mode = mode; this.beh?.setMode(mode); }
   setPlatforms(p: Platform[]) { this.platforms = p; }
-  runPlan(_steps: ActionStep[]) { /* TODO: exit anim on run.plan */ }
-  pushToolEvent(_e: RunEvent) { /* TODO: edge-peek */ }
-  showResult(_prop: ActionStep['prop'], _mood: Mood) { /* TODO */ }
-  setApprovalPending(_pending: boolean) { /* TODO */ }
-  doIntent(_i: LocalIntent) { /* TODO: behavior state machine */ }
+  runPlan(steps: ActionStep[]) { this.peekEvents = []; this.beh?.runPlan(steps); }
+  pushToolEvent(e: RunEvent) { this.beh?.pushToolEvent(e); }
+  showResult(prop: ActionStep['prop'], mood: Mood) { this.beh?.showResult(prop, mood); }
+  setApprovalPending(pending: boolean) { this.beh?.setApprovalPending(pending); }
+  doIntent(i: LocalIntent) { this.beh?.doIntent(i); }
   setSpeaking(_amplitude: number) { /* TODO */ }
   generatePet(input: { kind: 'photo' | 'drawing'; image: Blob; species: Species; name: string },
               onProgress: (p: { stage: string; pct: number }) => void): Promise<PetBundle> {
