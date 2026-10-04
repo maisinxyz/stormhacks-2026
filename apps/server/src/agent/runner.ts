@@ -28,6 +28,8 @@ export function untrusted(source: string, data: unknown): string {
 }
 
 class RunEnded extends Error {}
+/** Background writes must never become unhandled rejections (Node would exit). */
+const logError = (err: unknown) => console.error(JSON.stringify({ level: 'error', b1: 'run', err: String((err as Error)?.stack ?? err) }));
 class StepLimit extends Error {}
 
 function withTimeout<T>(p: Promise<T>, ms: number, signal: AbortSignal): Promise<T> {
@@ -54,6 +56,7 @@ export class AgentRunner {
     this.active.set(run.id, abort);
     void new RunExecution(this.ctx, this.hub, this.gate, this.brain, run, user, abort.signal)
       .execute()
+      .catch(logError)
       .finally(() => this.active.delete(run.id));
     return run;
   }
@@ -190,7 +193,7 @@ class RunExecution {
 
   private emitPlan() {
     const steps = structuredClone(this.steps);
-    void this.ctx.store.updateRun(this.run.id, { steps });
+    this.ctx.store.updateRun(this.run.id, { steps }).catch(logError);
     return this.emit({ type: 'run.plan', steps });
   }
 
@@ -243,25 +246,39 @@ class RunExecution {
 
     await this.emit({ type: 'tool.start', stepId: step.id, tool: def.name, label: step.label });
 
+    // Progress from an attempt that timed out (and was superseded or ended the run) is dropped.
+    let currentAttempt = 0;
+    const tctxFor = (attempt: number) => ({
+      connectors: connectors!,
+      progress: (note: string, itemsRead?: number) => {
+        if (attempt !== currentAttempt || this.ended) return;
+        this.emit({ type: 'tool.progress', stepId: step.id, note, ...(itemsRead !== undefined && { itemsRead }) }).catch(logError);
+      },
+    });
+
     let payload = input;
-    const spec = def.approval?.(input);
+    let spec = def.approval?.(input);
     if (spec) {
-      const approved = await this.awaitApproval(step, def, input, spec);
+      if (def.prepare) {
+        try { payload = await withTimeout(def.prepare(input, tctxFor(-1)), this.ctx.config.toolTimeoutMs, this.signal); }
+        catch (err) {
+          if (err instanceof RunEnded || this.signal.aborted) throw new RunEnded();
+          await this.emit({ type: 'tool.end', stepId: step.id, ok: false });
+          return { id: call.id, isError: true, content: err instanceof ConnectorError ? `${err.code}: ${err.message}` : 'Lookup failed.' };
+        }
+        spec = def.approval!(payload)!;
+      }
+      const approved = await this.awaitApproval(step, def, payload, spec);
       if (!approved) throw new RunEnded('denied');   // run already ended with a sheepish result
       payload = approved.payload;
     }
 
-    const tctx = {
-      connectors: connectors!,
-      progress: (note: string, itemsRead?: number) => {
-        void this.emit({ type: 'tool.progress', stepId: step.id, note, ...(itemsRead !== undefined && { itemsRead }) });
-      },
-    };
-    // Outbound actions never auto-retry: a timeout may still have delivered the email.
-    const attempts = def.policy === 'outbound' ? 1 : RETRIES + 1;
+    // Anything that needed approval runs exactly once: a timeout may still have delivered it.
+    const attempts = def.policy === 'outbound' || spec ? 1 : RETRIES + 1;
     for (let attempt = 1; ; attempt++) {
+      currentAttempt = attempt;
       try {
-        const out = await withTimeout(def.run(payload, tctx), this.ctx.config.toolTimeoutMs, this.signal);
+        const out = await withTimeout(def.run(payload, tctxFor(attempt)), this.ctx.config.toolTimeoutMs, this.signal);
         await this.emit({ type: 'tool.end', stepId: step.id, ok: true });
         if (out.undo) await this.ctx.store.recordUndo({ runId: this.run.id, tool: def.name, undo: out.undo, at: new Date().toISOString() });
         this.log('tool ok', { tool: def.name, attempt });

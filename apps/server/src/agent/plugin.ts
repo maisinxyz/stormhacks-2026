@@ -31,7 +31,11 @@ export interface B1Options {
 
 export async function registerB1(app: FastifyInstance, opts: B1Options) {
   const config = { ...loadConfig(), ...opts.config };
-  if (isDevSecret(config)) app.log.warn('SESSION_SECRET not set; using a dev-only secret');
+  if (isDevSecret(config)) {
+    // The dev secret is public, so anyone could sign a session cookie for any user.
+    if (process.env.NODE_ENV === 'production') throw new Error('SESSION_SECRET must be set in production');
+    app.log.warn('SESSION_SECRET not set; using a dev-only secret');
+  }
   if (!app.hasDecorator('unsignCookie')) await app.register(cookie, { secret: config.sessionSecret });
 
   const ctx: B1Context = {

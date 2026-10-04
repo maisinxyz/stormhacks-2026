@@ -71,7 +71,9 @@ re-emitted when steps are added or a generated prop sticker arrives. `run.say` i
 
 - **Approvals:** outbound or destructive tools (`gmail.send`, `drive.share`, `drive.trash`, and calendar
   create/update with attendees) pause the run. The exact payload is stored and hashed. Only a matching
-  `actionId` + `contentHash` executes it, once, and what executes is the *stored* payload. Outbound actions are never auto-retried.
+  `actionId` + `contentHash` executes it, once, and what executes is the *stored* payload. Anything that needed approval
+  is never auto-retried. Previews for file actions show the real file name (looked up server-side), not the model's.
+  Edits to fields a tool doesn't have are rejected, never dropped.
 - **Mode:** Play mode blocks `/agent/run` and `/approve`, and the runner re-checks mode before every connector call.
 - **Prompt injection:** tool output reaches the model only inside escaped `<untrusted_data>` blocks, under a
   system rule that it is data, never instructions. Even if the model is fooled, any send still needs a human

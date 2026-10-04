@@ -27,20 +27,19 @@ export interface Decision { decision: 'approved' | 'denied' | 'expired' | 'cance
 
 /** One pending decision per run; the runner awaits it, the HTTP routes resolve it. */
 export class ApprovalGate {
-  private waiters = new Map<string, { done: (d: Pick<Decision, 'decision'>) => void; actionId: string }>();
+  private waiters = new Map<string, { done: (d: Pick<Decision, 'decision'>) => void; actionId: string; timer: NodeJS.Timeout }>();
 
   wait(runId: string, actionId: string, ttlMs: number, signal: AbortSignal): Promise<Decision> {
     return new Promise(resolve => {
       const done = (d: Pick<Decision, 'decision'>) => {
-        clearTimeout(timer); signal.removeEventListener('abort', onAbort);
         const entry = this.waiters.get(runId);
+        clearTimeout(entry?.timer); signal.removeEventListener('abort', onAbort);
         this.waiters.delete(runId);
         resolve({ decision: d.decision, actionId: entry?.actionId ?? actionId });
       };
-      const timer = setTimeout(() => done({ decision: 'expired' }), ttlMs);
       const onAbort = () => done({ decision: 'cancelled' });
       signal.addEventListener('abort', onAbort, { once: true });
-      this.waiters.set(runId, { done, actionId });
+      this.waiters.set(runId, { done, actionId, timer: setTimeout(() => done({ decision: 'expired' }), ttlMs) });
     });
   }
 
@@ -53,5 +52,14 @@ export class ApprovalGate {
 
   /** The actionId currently awaiting a decision for this run (changes when an edit re-requests approval). */
   pendingAction(runId: string) { return this.waiters.get(runId)?.actionId; }
-  setPendingAction(runId: string, actionId: string) { const w = this.waiters.get(runId); if (w) w.actionId = actionId; }
+
+  /** Swaps in a re-issued approval and restarts its expiry clock. */
+  setPendingAction(runId: string, actionId: string, ttlMs: number) {
+    const w = this.waiters.get(runId);
+    if (!w) return false;
+    clearTimeout(w.timer);
+    w.actionId = actionId;
+    w.timer = setTimeout(() => w.done({ decision: 'expired' }), ttlMs);
+    return true;
+  }
 }

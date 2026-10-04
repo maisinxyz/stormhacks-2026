@@ -93,7 +93,7 @@ export async function agentRoutes(app: FastifyInstance, ctx: B1Context, hub: Run
 
     if (edited) {
       const reissued = await reissueEdited(approval, edited);
-      if ('error' in reissued) return reply.code(400).send(reissued);
+      if ('error' in reissued) return reply.code(reissued.error === 'run_not_waiting' ? 409 : 400).send(reissued);
       if (reissued.changed) {
         return reply.code(409).send({
           error: 'reapproval_required', actionId: reissued.next.actionId,
@@ -105,7 +105,11 @@ export async function agentRoutes(app: FastifyInstance, ctx: B1Context, hub: Run
     if (!(await ctx.store.transitionApproval(actionId, 'pending', 'approved'))) {
       return reply.code(409).send({ error: 'approval_not_pending' });
     }
-    runner.gate.resolve(run.id, { decision: 'approved' });
+    // Expiry or cancel can win the race between the status flip and this resolve.
+    if (!runner.gate.resolve(run.id, { decision: 'approved' })) {
+      await ctx.store.transitionApproval(actionId, 'approved', 'expired');
+      return reply.code(409).send({ error: 'run_not_waiting' });
+    }
     return { ok: true, status: 'approved' };
   });
 
@@ -113,6 +117,10 @@ export async function agentRoutes(app: FastifyInstance, ctx: B1Context, hub: Run
   async function reissueEdited(old: Approval, edited: NonNullable<z.infer<typeof ApproveBody>['edited']>) {
     const def = TOOL_BY_NAME.get(old.tool);
     if (!def?.approval) return { error: 'edit_not_supported' as const };
+    // Fields this tool doesn't have (e.g. `to` on a calendar invite) must not be silently dropped.
+    const shape = (def.input as unknown as z.ZodObject).shape;
+    const unknown = Object.keys(edited).filter(k => !(k in shape));
+    if (unknown.length) return { error: 'edit_not_supported' as const, fields: unknown };
     const parsed = def.input.safeParse({ ...old.payload, ...edited });
     if (!parsed.success) return { error: 'invalid_edit' as const, message: parsed.error.message };
     const payload = JSON.parse(JSON.stringify(parsed.data)) as Record<string, unknown>;
@@ -128,7 +136,10 @@ export async function agentRoutes(app: FastifyInstance, ctx: B1Context, hub: Run
       createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + ctx.config.approvalTtlMs).toISOString(),
     };
     await ctx.store.createApproval(next);
-    runner.gate.setPendingAction(old.runId, actionId);
+    if (!runner.gate.setPendingAction(old.runId, actionId, ctx.config.approvalTtlMs)) {
+      await ctx.store.transitionApproval(actionId, 'pending', 'expired');
+      return { error: 'run_not_waiting' as const };
+    }
     await hub.emit(old.runId, { type: 'approval.required', actionId, kind: next.kind, preview: next.preview, contentHash: next.contentHash });
     return { changed: true as const, next };
   }

@@ -24,6 +24,8 @@ export interface ToolDef<I = any> {
   policy: Policy;
   /** Non-null means the call is held for human approval; the stored input is what executes. */
   approval?: (input: I) => ApprovalSpec | null;
+  /** Replaces model-supplied display fields with server truth before an approval preview is built. */
+  prepare?: (input: I, t: ToolContext) => Promise<I>;
   run(input: I, t: ToolContext): Promise<ToolOutput>;
 }
 
@@ -33,6 +35,11 @@ const clip = (s: string, n = 40) => s.length > n ? `${s.slice(0, n - 1)}…` : s
 const max = z.number().int().min(1).max(25).default(10);
 
 function tool<I>(def: ToolDef<I>): ToolDef<I> { return def; }
+
+/** The preview must name the file that will actually be affected, not what the model called it. */
+async function realFileName<I extends { fileId: string; fileName: string }>(i: I, t: ToolContext): Promise<I> {
+  return { ...i, fileName: (await t.connectors.drive.get(i.fileId)).name };
+}
 
 const OutgoingEmail = z.object({
   to: emails, cc: z.array(z.string().email()).max(50).optional(),
@@ -141,6 +148,7 @@ export const TOOLS: ToolDef[] = [
     input: z.object({ fileId: z.string(), fileName: z.string().max(300) }),
     label: i => `Deleting "${clip(i.fileName)}"`,
     approval: i => ({ kind: 'delete', preview: { summary: `Move "${i.fileName}" to the Drive trash.` } }),
+    prepare: realFileName,
     async run(i, t) { await t.connectors.drive.trash(i.fileId); return { data: { trashed: i.fileId } }; },
   }),
   tool({
@@ -149,6 +157,7 @@ export const TOOLS: ToolDef[] = [
     input: z.object({ fileId: z.string(), fileName: z.string().max(300), email: z.string().email(), role: z.enum(['reader', 'commenter', 'writer']).default('reader') }),
     label: i => `Sharing "${clip(i.fileName)}"`,
     approval: i => ({ kind: 'share', preview: { to: [i.email], summary: `Give ${i.email} ${i.role} access to "${i.fileName}".` } }),
+    prepare: realFileName,
     async run(i, t) { await t.connectors.drive.share(i.fileId, i.email, i.role); return { data: { shared: i.fileId, with: i.email } }; },
   }),
   tool({

@@ -11,10 +11,14 @@ export const isTerminal = (e: RunEvent) => e.type === 'run.result' || e.type ===
 export class RunHub {
   private emitter = new EventEmitter().setMaxListeners(0);
   private chains = new Map<string, Promise<unknown>>();
+  private ended = new Set<string>();
 
   constructor(private store: B1Store) {}
 
+  /** Nothing is recorded after a terminal event, so a finished stream stays finished. Returns -1 if dropped. */
   emit(runId: string, event: RunEvent): Promise<number> {
+    if (this.ended.has(runId)) return Promise.resolve(-1);
+    if (isTerminal(event)) this.ended.add(runId);
     const next = (this.chains.get(runId) ?? Promise.resolve()).then(async () => {
       const seq = await this.store.appendEvent(runId, event);
       this.emitter.emit(runId, { seq, event } satisfies Sequenced);
