@@ -14,6 +14,23 @@ export const KNOWN_DOGS: KnownDog[] = [
       colors: { base: '#9A4A27', belly: '#B26A3E', ear: '#753419', muzzle: '#A85C34', paws: '#B26A3E', tailTip: '#84401F', nose: '#2A1C18', eye: '#120C0A' },
     },
   },
+  {
+    // German shepherd: tan coat with a black saddle, black muzzle and tail, tall pointed ears, deep chest, bushy tail carried low
+    id: 'german-shepherd', name: 'Rex', photo: new URL('./known/germanShepherd.png', import.meta.url).href,
+    traits: {
+      bodyLength: 0.98, girth: 0.28, legLength: 0.3, headSize: 0.25, snout: 0.19, earShape: 1, earSize: 1.45, tailLength: 0.42, tailUp: 0.12, size: 1.3,
+      saddle: '#1F1D20',
+      colors: { base: '#B9733A', belly: '#C98B4E', ear: '#2A1D16', muzzle: '#201A18', paws: '#C47A36', tailTip: '#26211F', nose: '#0C0A0A', eye: '#2A160B' },
+    },
+  },
+  {
+    // Rottweiler: black coat with tan muzzle and feet, broad head, short muzzle, small folded ears, heavy build, stub tail
+    id: 'rottweiler', name: 'Bruno', photo: new URL('./known/rottweiler.png', import.meta.url).href,
+    traits: {
+      bodyLength: 0.9, girth: 0.31, legLength: 0.27, headSize: 0.28, snout: 0.14, earShape: 0.08, earSize: 0.8, tailLength: 0.1, tailUp: 0.5, size: 1.15,
+      colors: { base: '#2B2526', belly: '#332A28', ear: '#1E1A1A', muzzle: '#B26A32', paws: '#B26A32', tailTip: '#2B2526', nose: '#0C0A0A', eye: '#2A160B' },
+    },
+  },
 ];
 
 const N = 8;
