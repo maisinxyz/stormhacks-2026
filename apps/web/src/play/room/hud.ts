@@ -13,6 +13,8 @@ export type ItemId = typeof ITEMS[number]['id'];
 
 export interface HudHandlers {
   back(): void; camera(): void; mic(): void;
+  /** The on-screen action button (phones): pressed / released. */
+  use(down: boolean): void;
   pick(item: ItemId): void;
   /** Any panel opened: the game should give the mouse back. */
   panel(): void;
@@ -29,9 +31,10 @@ export class RoomHud {
     el.className = 'room-ui';
     el.innerHTML = `<div class="room-top"><button class="room-work-button" data-action="back" aria-label="Back to Work dashboard">‹ <span>Back to Work</span></button><div class="room-title"><span class="room-eyebrow" data-owner></span><strong>Play room</strong></div><div class="room-top-right"><button data-action="help" aria-label="What can I say to my pet?" class="room-info">i</button><button data-action="camera" aria-label="Open camera">◎</button></div></div>`
       + `<div class="room-stats" aria-live="polite"><span class="room-hearts" data-hearts role="img"></span><span class="room-count" data-count></span></div>`
-      + `<div class="room-cross" aria-hidden="true"></div>`
+      + `<div class="room-cross" aria-hidden="true"></div><div class="room-charge" aria-hidden="true"><i></i></div>`
       + `<div class="room-hotbar" role="toolbar" aria-label="Held item">${ITEMS.map((it, i) => `<button data-item="${it.id}" aria-label="${it.label}" aria-pressed="false">${it.icon}<small>${touch ? it.label : i + 1}</small></button>`).join('')}</div>`
       + `<button class="room-mic" data-action="mic" aria-label="Talk to your pet: tap to start, tap again to stop">🎤<small>${touch ? 'Talk' : 'T'}</small></button>`
+      + (touch ? `<button class="room-use" data-action="use" aria-label="Use the held item: hold to throw harder">Pet</button>` : '')
       + `<div class="room-pets"><button data-action="pets" aria-label="Choose a pet" aria-haspopup="true" aria-expanded="false">🐾<small>Pets</small></button><div class="room-dogs" data-pets hidden></div></div>`
       + `<div class="cam-voice" role="status" hidden></div><div class="cam-toast" role="status"></div>`
       + `<div class="room-coach hide" data-coach></div>`
@@ -40,6 +43,12 @@ export class RoomHud {
     on('back', h.back); on('camera', h.camera); on('mic', h.mic);
     on('help', () => this.help(this.q('.cam-help').hidden)); on('help-close', () => this.help(false));
     el.querySelectorAll<HTMLButtonElement>('[data-item]').forEach(b => b.addEventListener('click', () => h.pick(b.dataset.item as ItemId)));
+    const use = el.querySelector<HTMLButtonElement>('[data-action="use"]');
+    if (use) {
+      let down = false;
+      const set = (d: boolean) => (ev: Event) => { ev.preventDefault(); if (down !== d) { down = d; h.use(d); } };
+      use.addEventListener('pointerdown', set(true)); use.addEventListener('pointerup', set(false)); use.addEventListener('pointercancel', set(false)); use.addEventListener('pointerleave', set(false));
+    }
     const pets = this.q('[data-pets]'), petsBtn = this.q('[data-action="pets"]');
     const openPets = (open: boolean) => { pets.hidden = !open; petsBtn.setAttribute('aria-expanded', String(open)); if (open) h.panel(); };
     petsBtn.addEventListener('click', () => openPets(pets.hidden));
@@ -51,7 +60,13 @@ export class RoomHud {
   }
 
   owner(name: string) { this.q('[data-owner]').textContent = `${name}'s place`; }
-  item(id: ItemId) { this.el.querySelectorAll<HTMLButtonElement>('[data-item]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.item === id))); }
+  item(id: ItemId) {
+    this.el.querySelectorAll<HTMLButtonElement>('[data-item]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.item === id)));
+    const use = this.el.querySelector('[data-action="use"]');
+    if (use) use.textContent = id === 'hand' ? 'Pet' : id === 'food' ? 'Feed' : 'Throw';
+  }
+  /** Throw power 0..1 under the crosshair (0 hides it). */
+  charge(v: number) { const c = this.q('.room-charge'); c.classList.toggle('on', v > 0); (c.firstElementChild as HTMLElement).style.width = `${Math.round(v * 100)}%`; }
   /** Happiness 0..100 as five hearts. */
   hearts(happiness: number) {
     const n = Math.round(Math.max(0, Math.min(100, happiness)) / 20), el = this.q('[data-hearts]');
