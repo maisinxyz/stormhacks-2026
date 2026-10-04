@@ -27,8 +27,8 @@ export function openSse(req: FastifyRequest, reply: FastifyReply) {
   };
   req.raw.on('close', close);
   return {
-    write: (id: string | number | undefined, data: unknown) => {
-      if (!closed) raw.write(`${id !== undefined ? `id: ${id}\n` : ''}data: ${JSON.stringify(data)}\n\n`);
+    write: (id: string | number | undefined, data: unknown, event?: string) => {
+      if (!closed) raw.write(`${event ? `event: ${event}\n` : ''}${id !== undefined ? `id: ${id}\n` : ''}data: ${JSON.stringify(data)}\n\n`);
     },
     onClose: (f: () => void) => cleanups.push(f),
     close,

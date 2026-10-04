@@ -13,6 +13,7 @@ import type { B1Context } from './context';
 import { RunHub } from './hub';
 import { claudeBrain } from './llm';
 import { mockBrain } from './mockBrain';
+import { notificationRoutes, type NotifyOptions } from './notifications';
 import { agentRoutes } from './routes';
 import { AgentRunner } from './runner';
 import { MemoryStore, type B1Store } from './store';
@@ -25,6 +26,7 @@ export interface B1Options {
   config?: Partial<B1Config>;
   /** Overrides the agent brain (tests). Defaults to MOCK_AGENT's scripts or Claude. */
   brain?: Brain;
+  notify?: Partial<NotifyOptions>;
 }
 
 export async function registerB1(app: FastifyInstance, opts: B1Options) {
@@ -48,6 +50,7 @@ export async function registerB1(app: FastifyInstance, opts: B1Options) {
 
   await authRoutes(app, ctx);
   await agentRoutes(app, ctx, hub, runner);
+  await notificationRoutes(app, ctx, opts.notify);
   return { ctx, hub, runner };
 }
 
