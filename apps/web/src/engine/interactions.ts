@@ -14,11 +14,13 @@ export interface InteractionHost {
   feed(item: FeedItem): boolean; // false if the species won't eat it
   holdBall(x: number, y: number): void;
   releaseBall(vx: number, vy: number): void;
-  point(x: number): void;
+  point(x: number, z?: number): void;
+  dragPet?(x: number, z: number, drop: boolean): void;
   cursor(x: number, y: number): void;
   approval(): { pending: boolean; actionId: string };
   setRing(p: number): void;
   mode(): Mode;
+  isGestureClaimed?(pointerId: number): boolean;
 }
 
 export const APPROVE_SECS = 1.2; // continuous stroke needed to pet-to-approve
@@ -63,12 +65,14 @@ export class Interactions {
   point(x: number, y: number) {
     const w = this.h.toWorld(x, y);
     if (!w) return;
-    this.h.emit({ type: 'POINT', x: w.x, y: w.y });
-    this.h.point(w.x);
+    const floorZ = Math.abs(w.z) > 1e-5 ? w.z : w.y;
+    this.h.emit({ type: 'POINT', x: w.x, y: floorZ });
+    this.h.point(w.x, floorZ);
   }
 
   private onDown = (e: PointerEvent) => {
     const onPet = this.h.hitPet(e.clientX, e.clientY), ball = !onPet && this.h.hitBall(e.clientX, e.clientY);
+    if (!onPet && !ball && this.h.isGestureClaimed?.(e.pointerId)) { this.down = undefined; return; }
     this.down = { x: e.clientX, y: e.clientY, t: e.timeStamp, path: 0, onPet, ball };
     this.last = { x: e.clientX, y: e.clientY, t: e.timeStamp };
     this.speed = 0; this.revs = []; this.dirX = 0; this.flick = [{ x: e.clientX, y: e.clientY, t: e.timeStamp }];
@@ -86,7 +90,7 @@ export class Interactions {
     this.revs = this.revs.filter(t => e.timeStamp - t < 1000);
     this.last = { x: e.clientX, y: e.clientY, t: e.timeStamp };
     if (d.ball && w) { this.h.holdBall(w.x, w.y); this.flick.push({ x: e.clientX, y: e.clientY, t: e.timeStamp }); this.flick = this.flick.filter(f => e.timeStamp - f.t < 100); }
-    if (d.onPet) this.strokeT = 0;
+    if (d.onPet) { this.strokeT = 0; if (d.path > 12 && w) this.h.dragPet?.(w.x, Math.abs(w.z) > 1e-5 ? w.z : w.y, false); }
   };
 
   private onUp = (e: PointerEvent) => {
@@ -104,6 +108,7 @@ export class Interactions {
       this.h.emit({ type: 'THROW', vx: cl(vx), vy: cl(vy) });
       return;
     }
+    if (d.onPet && d.path >= 12) { const w = this.h.toWorld(e.clientX, e.clientY); if (w) this.h.dragPet?.(w.x, Math.abs(w.z) > 1e-5 ? w.z : w.y, true); return; }
     if (d.onPet && d.path < 6 && e.timeStamp - d.t < 400) { this.h.emit({ type: 'POKE' }); this.h.react('poke'); }
   };
 

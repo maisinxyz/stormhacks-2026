@@ -4,6 +4,7 @@ import { cleanupSplat } from './engine/pipeline/cleanup';
 import { decodeSplat, encodeSplat } from './engine/pipeline/gaussians';
 import { fitRig, skinWeights } from './engine/pipeline/rig';
 
+async function boot() {
 const species = new URLSearchParams(location.search).get('pet') === 'bird' ? 'bird' : 'dog';
 const engine = new Engine();
 const fps = document.getElementById('fps')!;
@@ -72,3 +73,5 @@ engine.on('POINT', e => console.log('point', e.x.toFixed(2))); engine.on('APPROV
 engine.onStats(s => console.log('stats', JSON.stringify(s)));
 
 if (new URLSearchParams(location.search).has('accept')) import('./acceptance').then(m => m.run(engine, bundle)); // PRD 1.10 acceptance run
+}
+void boot();

@@ -9,9 +9,12 @@ import type { ParticleKind, SpeciesPack } from './species';
 
 export type State = 'idle' | 'listening' | 'exit' | 'working' | 'return' | 'approval' | 'sleep' | 'play' | 'intent' | 'reaction';
 
+export interface FurnitureSpot { id: 'bed' | 'bowl' | 'rug' | 'window' | 'toybin'; position: { x: number; z: number }; heading: number; kind: 'sleep' | 'eat' | 'play' | 'watch' | 'fetch'; clip: string; weight: (stats: Needs['stats'], mood: Mood, mode: Mode) => number; }
+
 export interface BehaviorHost {
-  bounds(): { xmin: number; xmax: number };
+  bounds(): { xmin: number; xmax: number; zmin?: number; zmax?: number };
   platformSpots(): { id: string; x: number; y: number }[]; // world-space perch points, from setPlatforms
+  furnitureSpots?(): FurnitureSpot[];
   setVisible(v: boolean): void;
   emit(e: BusEvent): void;
   burst(kind: ParticleKind, x: number, y: number): void;
@@ -32,7 +35,7 @@ export class Behavior {
   state: State = 'idle';
   mode: Mode = 'work';
   mood: Mood = 'neutral';
-  x = 0; y = 0;
+  x = 0; y = 0; z = 0;
   private dir = 1;
   private yaw = 0.6;
   private anim = new Animator();
@@ -46,6 +49,7 @@ export class Behavior {
   private fast = false;
   private cursor?: { x: number; y: number; t: number };
   private animId = 0;
+  private spot?: { id: FurnitureSpot['id']; until: number };
 
   constructor(private pack: SpeciesPack, private host: BehaviorHost, private needs: Needs) {
     this.start(this.idle(), 'idle');
@@ -116,7 +120,7 @@ export class Behavior {
   }
 
   // ---------- frame update ----------
-  update(dt: number): { pose: Pose; x: number; y: number; yaw: number } {
+  update(dt: number): { pose: Pose; x: number; y: number; z: number; yaw: number } {
     for (let guard = 0; guard < 8; guard++) {
       if (!this.step) {
         const n = this.routine?.next();
@@ -133,7 +137,7 @@ export class Behavior {
     this.yaw += (target - this.yaw) * Math.min(1, dt * 8);
     this.moving = false;
     this.y += ((this.targetY - this.y)) * Math.min(1, dt * 10);
-    return { pose, x: this.x, y: this.y + (pose.y ?? 0), yaw: this.yaw + (pose.yaw ?? 0) };
+    return { pose, x: this.x, y: this.y + (pose.y ?? 0), z: this.z, yaw: this.yaw + (pose.yaw ?? 0) };
   }
 
   // ---------- internals ----------
@@ -164,18 +168,20 @@ export class Behavior {
     yield* this.wait(secs ?? c.dur / speed);
   }
 
-  /** Walk/run to world x (y stays); `fast` uses the run clip. */
-  private *walkTo(x: number, fast = false): Routine {
+  /** Walk/run to a floor point. The boolean overload preserves the desk's old 1-D calls. */
+  private *walkTo(x: number, zOrFast: number | boolean = this.z, fastArg = false): Routine {
+    const targetZ = typeof zOrFast === 'number' ? zOrFast : this.z;
+    const fast = typeof zOrFast === 'boolean' ? zOrFast : fastArg;
     const name = fast ? this.pack.locomotion.run : this.pack.locomotion.walk, c = this.pack.clips[name];
     this.playClip(name);
     this.fast = fast;
     const spd = (c.move ?? 0.7) * MOODS[this.mood].speed;
     yield dt => {
-      const d = x - this.x;
-      this.dir = d >= 0 ? 1 : -1;
+      const dx = x - this.x, dz = targetZ - this.z, distance = Math.hypot(dx, dz);
+      this.dir = dx >= 0 ? 1 : -1;
       this.moving = true;
-      this.x += Math.sign(d) * Math.min(Math.abs(d), spd * dt);
-      return Math.abs(x - this.x) < 0.02;
+      if (distance > 0.001) { const step = Math.min(distance, spd * dt); this.x += dx / distance * step; this.z += dz / distance * step; this.yaw += (Math.atan2(dx, dz) - this.yaw) * Math.min(1, dt * 8); }
+      return Math.hypot(x - this.x, targetZ - this.z) < 0.02;
     };
   }
 
@@ -194,7 +200,25 @@ export class Behavior {
       if (this.needs.stats.energy <= 0) { yield* this.sleepRoutine(true); continue; }
       if (this.needs.stats.energy < 25 && Math.random() < 0.4) { yield* this.play('yawn', undefined); continue; }
       if (this.mode === 'play' && this.cursor && performance.now() - this.cursor.t < 3000 && (this.pack.id === 'cat' || this.pack.id === 'bird')) { yield* this.chaseCursor(); continue; }
-      const { xmin, xmax } = this.host.bounds();
+      const { xmin, xmax, zmin = 0, zmax = 0 } = this.host.bounds();
+      const furniture = this.host.furnitureSpots?.() ?? [];
+      if (furniture.length) {
+        const now = performance.now();
+        let chosen = furniture.find(s => s.id === this.spot?.id && now < (this.spot?.until ?? 0));
+        if (!chosen) {
+          const ranked = furniture.map(s => ({ s, score: s.weight(this.needs.stats, this.mood, this.mode) + Math.random() * .2 })).sort((a, b) => b.score - a.score);
+          chosen = ranked[0]?.s;
+          if (chosen) this.spot = { id: chosen.id, until: now + rand(6000, 15000) };
+        }
+        if (chosen && Math.random() < .8) {
+          yield* this.walkTo(chosen.position.x, chosen.position.z, this.mode === 'play' && chosen.kind === 'play');
+          this.host.emit({ type: 'PET_AT_PLATFORM', platformId: chosen.id });
+          yield* this.play(chosen.clip, Math.max(2, (this.spot?.until ?? now + 6000) - performance.now()) / 1000);
+          if (chosen.kind === 'eat') this.needs.fed();
+          if (chosen.kind === 'play') this.needs.played(3);
+          continue;
+        }
+      }
       const spots = this.host.platformSpots();
       if (this.mode === 'work' && spots.length && Math.random() < 0.55) {
         // Work-mode idle: perch / watch near the Desk
@@ -206,7 +230,8 @@ export class Behavior {
         yield* this.hopTo(0);
       } else if (this.mode === 'play' || Math.random() < 0.3) {
         // Play-mode idle roams
-        yield* this.walkTo(rand(xmin + 0.5, xmax - 0.5), this.mode === 'play' && Math.random() < 0.4);
+        const targetZ = zmax > zmin ? rand(zmin + 0.5, zmax - 0.5) : 0;
+        yield* this.walkTo(rand(xmin + 0.5, xmax - 0.5), targetZ, this.mode === 'play' && Math.random() < 0.4);
         yield* this.play(this.pick(this.pack.idleList), rand(1.5, 3));
       } else {
         yield* this.play(this.pick(this.pack.idleList), rand(3, 6));
@@ -333,13 +358,19 @@ export class Behavior {
     if (stale && this.mode === 'play' && this.state === 'play' && (this.pack.id === 'cat' || this.pack.id === 'bird')) this.start(this.idle(), 'play');
   }
 
-  pointTo(x: number) {
+  pointTo(x: number, z = this.z) {
     if (this.state === 'exit' || this.state === 'working' || this.state === 'return' || this.state === 'approval') return;
-    this.start(this.pointRoutine(x), 'intent');
+    this.start(this.pointRoutine(x, z), 'intent');
   }
 
-  private *pointRoutine(x: number): Routine {
-    yield* this.walkTo(x, Math.abs(x - this.x) > 1.5);
+  dragTo(x: number, z: number, drop = false) {
+    if (this.state === 'exit' || this.state === 'working' || this.state === 'return' || this.state === 'approval') return;
+    this.x = x; this.z = z; this.y = drop ? 0 : .12;
+    if (drop) this.start(this.pointRoutine(x, z), 'intent');
+  }
+
+  private *pointRoutine(x: number, z = this.z): Routine {
+    yield* this.walkTo(x, z, Math.hypot(x - this.x, z - this.z) > 1.5);
     // dog/cat sniff or sit at the target; bird just settles
     yield* this.play(this.pack.id === 'bird' ? 'perch' : this.pick(['sniff', 'sit']), rand(1.5, 3));
   }
@@ -379,6 +410,9 @@ export class Behavior {
     this.host.emit({ type: 'ANIM_DONE', id: 'fetch_ball' });
     yield* this.play('wag', 1.5);
   }
+
+  snapshot() { return { x: this.x, z: this.z, heading: this.yaw, y: this.y, state: this.state }; }
+  applySnapshot(s: { x: number; z: number; heading?: number; y?: number }) { this.x = s.x; this.z = s.z; this.yaw = s.heading ?? this.yaw; this.y = s.y ?? this.y; }
 
   /** Cat chases the laser dot; bird lands on the cursor target. */
   private *chaseCursor(): Routine {

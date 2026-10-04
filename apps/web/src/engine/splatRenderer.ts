@@ -131,6 +131,7 @@ export class SplatMesh {
       blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     });
     this.mesh = new THREE.Mesh(this.geo, mat);
+    this.mesh.renderOrder = 1;
     this.mesh.frustumCulled = false;
   }
 
@@ -144,6 +145,8 @@ export class SplatMesh {
     this.orderAttr.needsUpdate = true;
     this.lastDir.set(9, 9, 9); // force resort
   }
+
+  setDepthTest(on: boolean) { const material = this.mesh.material as THREE.RawShaderMaterial; material.depthTest = on; material.depthWrite = false; material.needsUpdate = true; }
 
   update(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera) {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
