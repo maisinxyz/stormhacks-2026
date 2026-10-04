@@ -16,6 +16,7 @@ export interface PlushTraits {
   snout: number;       // muzzle length, 0.05 (flat face) .. 0.26 (long)
   earShape: number;    // 0 = floppy, hanging .. 1 = pointy, upright
   earSize: number;     // 0.6 .. 1.5
+  points?: string;     // optional tan points on a dark coat (rottweiler, dobermann): eyebrow dots, chest patches, socks; the top of the muzzle keeps the base colour
   tailLength: number;  // 0.08 (stub) .. 0.5
   tailUp: number;      // 0 = hangs back .. 1 = carried up
   colors: { base: string; belly: string; ear: string; muzzle: string; paws: string; tailTip: string; nose: string; eye: string };
@@ -27,7 +28,7 @@ export const DEFAULT_PLUSH: PlushTraits = {
 };
 
 type V3 = [number, number, number];
-interface Prim { bone: string; c: V3; r: V3; kind: 0 | 1 | 2; color: string; seam: 0 | 1 | 2 } // kind: 0 fur, 1 eye, 2 nose
+interface Prim { bone: string; c: V3; r: V3; kind: 0 | 1 | 2 | 3; color: string; seam: 0 | 1 | 2 } // kind: 0 fur, 1 eye, 2 nose, 3 marking (paints the fur inside it, adds no shape)
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const lerp3 = (a: V3, b: V3, t: number): V3 => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
@@ -61,6 +62,11 @@ export function plushDog(t: PlushTraits) {
       const bone = `leg${name}${sx > 0 ? 'L' : 'R'}`;
       prims.push({ bone, c: [sx * lx, l * 0.55, z], r: [0.088 * k, l * 0.62, 0.092 * k], kind: 0, color: C.base, seam: 0 });
       prims.push({ bone, c: [sx * lx, 0.052, z + 0.03], r: [0.1 * k, 0.052, 0.125 * k], kind: 0, color: C.paws, seam: 0 }); // paw
+      if (t.points) prims.push({ bone, c: [sx * lx, l * 0.2, z], r: [0.13 * k, l * 0.34, 0.14 * k], kind: 3, color: t.points, seam: 0 }); // sock
+    }
+    if (t.points) {
+      prims.push({ bone: 'head', c: [sx * h * 0.42, head[1] + h * 0.47, head[2] + h * 0.74], r: [h * 0.1, h * 0.09, h * 0.1], kind: 3, color: t.points, seam: 0 }); // eyebrow dot
+      prims.push({ bone: 'root', c: [sx * g * 0.45, by - g * 0.08, zf + g], r: [g * 0.3, g * 0.3, g * 0.3], kind: 3, color: t.points, seam: 0 }); // chest patch
     }
   }
   // tail: three balls along a direction between "hangs back" and "carried up"
@@ -69,6 +75,7 @@ export function plushDog(t: PlushTraits) {
   prims.push({ bone: 'tail', c: at(0.25), r: [0.072, 0.072, 0.072], kind: 0, color: C.base, seam: 0 });
   prims.push({ bone: 'tail', c: at(0.6), r: [0.068, 0.068, 0.068], kind: 0, color: C.base, seam: 0 });
   prims.push({ bone: 'tail', c: at(1), r: [0.082, 0.082, 0.082], kind: 0, color: C.tailTip, seam: 0 });
+  if (t.points) prims.push({ bone: 'head', c: [0, snoutC[1] + snoutR[1] * 0.8, snoutC[2] - snoutR[2] * 0.1], r: [snoutR[0] * 0.5, snoutR[1] * 0.55, snoutR[2]], kind: 3, color: C.base, seam: 0 }); // dark bridge of the muzzle
 
   let bones: Bone[] = [
     { name: 'root', parent: -1, head: [0, by, -L * 0.1], tail: [0, by, L * 0.3] },
@@ -80,11 +87,11 @@ export function plushDog(t: PlushTraits) {
     { name: 'legBR', parent: 0, head: [-lx, l + g * 0.1, -zf], tail: [-lx, 0, -zf] },
   ];
   // normalise: the tallest point becomes height 1 (the Engine scales a 1-unit pet to metres)
-  const k1 = 1 / Math.max(...prims.map(p => p.c[1] + p.r[1]));
+  const k1 = 1 / Math.max(...prims.filter(p => p.kind !== 3).map(p => p.c[1] + p.r[1]));
   const sc = (v: V3): V3 => [v[0] * k1, v[1] * k1, v[2] * k1];
   for (const p of prims) { p.c = sc(p.c); p.r = sc(p.r); }
   bones = bones.map(b => ({ ...b, head: sc(b.head), tail: sc(b.tail) }));
-  const ext = (i: number, sgn: number) => Math.max(...prims.map(p => sgn * p.c[i] + p.r[i]));
+  const ext = (i: number, sgn: number) => Math.max(...prims.filter(p => p.kind !== 3).map(p => sgn * p.c[i] + p.r[i]));
   return { prims, bones, min: [-ext(0, -1), 0, -ext(2, -1)] as V3, max: [ext(0, 1), 1, ext(2, 1)] as V3 };
 }
 
@@ -101,7 +108,7 @@ precision highp float;
 uniform mat4 modelMatrix, viewMatrix, projectionMatrix;
 uniform mat4 uInv[NB];      // posed model space -> each bone's rest space
 uniform vec4 uC[NP];        // rest centre, bone index
-uniform vec4 uR[NP];        // radii, kind (0 fur, 1 eye, 2 nose)
+uniform vec4 uR[NP];        // radii, kind (0 fur, 1 eye, 2 nose, 3 marking)
 uniform vec4 uCol[NP];      // colour, seam group (1 body, 2 muzzle)
 uniform vec3 uCam, uLight, uTint, uBMin, uBMax;
 in vec3 vP;
@@ -116,6 +123,7 @@ vec2 map(vec3 p) {
   for (int b = 0; b < NB; b++) q[b] = (uInv[b] * vec4(p, 1.)).xyz;
   float fur = 1e3, hard = 1e3, mat = 0.;
   for (int i = 0; i < NP; i++) {
+    if (uR[i].w > 2.5) continue; // markings only paint
     float d = ell(q[int(uC[i].w)] - uC[i].xyz, uR[i].xyz);
     if (uR[i].w < .5) fur = smin(fur, d, .07);
     else if (d < hard) { hard = d; mat = uR[i].w; }
@@ -130,9 +138,9 @@ vec3 coat(vec3 p, out vec2 seam, out vec3 qRoot, out vec3 qHead) {
   qRoot = q[0]; qHead = q[1];
   vec3 c = vec3(0.); float w = 0.; seam = vec2(0.);
   for (int i = 0; i < NP; i++) {
-    if (uR[i].w > .5) continue;
+    if (uR[i].w > .5 && uR[i].w < 2.5) continue;
     float d = max(ell(q[int(uC[i].w)] - uC[i].xyz, uR[i].xyz), 0.);
-    float wi = exp(-d * 55.);
+    float wi = exp(-d * 55.) * (uR[i].w > 2.5 ? 8. : 1.); // a marking outvotes the fur it sits on
     c += uCol[i].rgb * wi; w += wi;
     if (uCol[i].w > .5 && uCol[i].w < 1.5) seam.x += wi;
     if (uCol[i].w > 1.5) seam.y += wi;

@@ -7,6 +7,15 @@ export interface KnownDog { id: string; name: string; photo: string; traits: Plu
 
 export const KNOWN_DOGS: KnownDog[] = [
   {
+    // rottweiler: black coat with tan points (muzzle, eyebrow dots, chest, lower legs), broad head, small folded ears, deep chest, docked tail
+    id: 'rottweiler', name: 'Tank', photo: new URL('./known/rottweiler.png', import.meta.url).href,
+    traits: {
+      bodyLength: 0.9, girth: 0.31, legLength: 0.27, headSize: 0.29, snout: 0.14, earShape: 0, earSize: 0.85, tailLength: 0.1, tailUp: 0.35,
+      points: '#B0652B',
+      colors: { base: '#221E1F', belly: '#2B2523', ear: '#171415', muzzle: '#B0652B', paws: '#B0652B', tailTip: '#221E1F', nose: '#0C0A0A', eye: '#2A160B' },
+    },
+  },
+  {
     // smooth red dachshund: long low body, short legs, long muzzle, big hanging ears, long low tail, one coat colour
     id: 'dachshund', name: 'Frank', photo: new URL('./known/dachshund.png', import.meta.url).href,
     traits: {
