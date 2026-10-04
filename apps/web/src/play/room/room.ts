@@ -103,9 +103,6 @@ export class RoomView implements PlayView {
       pick: id => this.pick(id),
       panel: () => fps.release(),
     }, touch);
-    hud.el.insertAdjacentHTML('beforeend', "<div class=\"room-trays\">\n        <div class=\"room-tray room-treat-tray\">\n          <span class=\"room-tray-icon\">🍖</span>\n          <div class=\"room-tray-info\"><strong>Treat tray</strong><small>Give a snack</small></div>\n          <div class=\"room-treat-buttons\">\n            <button class=\"room-treat-btn\" data-action=\"treat\" title=\"Give a bone\" aria-label=\"Give your pet a bone\">🦴</button>\n            <button class=\"room-treat-btn\" data-action=\"treat\" title=\"Give a treat\" aria-label=\"Give your pet a treat\">🍖</button>\n          </div>\n        </div>\n        <div class=\"room-tray room-toy-tray\">\n          <span class=\"room-tray-icon\">🎾</span>\n          <div class=\"room-tray-info\"><strong>Toy box</strong><small>Play fetch</small></div>\n          <div class=\"room-toy-buttons\">\n            <button class=\"room-toy-btn\" data-action=\"toy\" title=\"Throw a ball\" aria-label=\"Throw a ball for your pet\">🎾</button>\n          </div>\n        </div>\n      </div>");
-    hud.el.querySelectorAll('[data-action="treat"]').forEach(btn => btn.addEventListener('click', () => ctx.engine.feed()));
-    hud.el.querySelectorAll('[data-action="toy"]').forEach(btn => btn.addEventListener('click', () => ctx.engine.spawnBall(-0.8, 1.2, 3.5, 2.5)));
     ctx.root.appendChild(hud.el);
     hud.owner(ctx.session.bundle.name); hud.item(this.item); hud.counts(this.fetches, this.tricks);
     this.coach(touch);
