@@ -20,6 +20,8 @@ export interface PlushTraits {
   tailUp: number;      // 0 = hangs back .. 1 = carried up
   colors: { base: string; belly: string; ear: string; muzzle: string; paws: string; tailTip: string; nose: string; eye: string };
   size?: number;      // overall size next to the default dog (1). 1.25 = a quarter taller, longer and wider
+  head?: string;      // head colour when it differs from the body (e.g. a ragdoll cat's dark mask)
+  tailFluff?: number; // tail thickness, 1 = default, 1.5 = bushy
   saddle?: string;     // optional darker blanket over the back and the top of the tail (e.g. a German shepherd's black saddle)
 }
 
@@ -47,7 +49,7 @@ export function plushDog(t: PlushTraits) {
     { bone: 'root', c: [0, by, -zf - g * 0.05], r: [g * 1.02, g * 1.02, g * 1.02], kind: 0, color: C.base, seam: 1 },    // rump
     { bone: 'root', c: [0, by - g * 0.45, 0], r: [g * 0.82, g * 0.6, L / 2 * 0.85], kind: 0, color: C.belly, seam: 0 },  // belly patch
     { bone: 'root', c: [0, by + g * 0.45, L / 2 - g * 0.05], r: [g * 0.72, g * 0.72, g * 0.72], kind: 0, color: C.base, seam: 0 }, // neck
-    { bone: 'head', c: head, r: [h * 1.05, h * 0.95, h * 0.95], kind: 0, color: C.base, seam: 0 },
+    { bone: 'head', c: head, r: [h * 1.05, h * 0.95, h * 0.95], kind: 0, color: t.head ?? C.base, seam: 0 },
     { bone: 'head', c: snoutC, r: snoutR, kind: 0, color: C.muzzle, seam: 2 },
     { bone: 'head', c: [0, snoutC[1] + snoutR[1] * 0.45, snoutC[2] + snoutR[2] * 0.85], r: [h * 0.2, h * 0.15, h * 0.13], kind: 2, color: C.nose, seam: 0 },
   ];
@@ -69,12 +71,16 @@ export function plushDog(t: PlushTraits) {
       prims.push({ bone, c: [sx * lx, 0.052, z + 0.03], r: [0.1 * k, 0.052, 0.125 * k], kind: 0, color: C.paws, seam: 0 }); // paw
     }
   }
-  // tail: three balls along a direction between "hangs back" and "carried up"
+  // tail: balls along a direction between "hangs back" and "carried up"
   const tb: V3 = [0, by + g * 0.45, -L / 2 + g * 0.1], up = t.tailUp, dl = Math.hypot(up, 1 - up * 0.6);
   const td: V3 = [0, up / dl, -(1 - up * 0.6) / dl], at = (f: number): V3 => [0, tb[1] + td[1] * t.tailLength * f, tb[2] + td[2] * t.tailLength * f];
-  prims.push({ bone: 'tail', c: at(0.25), r: [0.072, 0.072, 0.072], kind: 0, color: C.base, seam: 0 });
-  prims.push({ bone: 'tail', c: at(0.6), r: [0.068, 0.068, 0.068], kind: 0, color: C.base, seam: 0 });
-  prims.push({ bone: 'tail', c: at(1), r: [0.082, 0.082, 0.082], kind: 0, color: C.tailTip, seam: 0 });
+  // three balls for a normal tail; a long one gets more so it stays one piece instead of a string of beads
+  const tf = t.tailFluff ?? 1, nt = Math.max(3, Math.ceil(t.tailLength / 0.11));
+  const stops = nt === 3 ? [0.25, 0.6, 1] : Array.from({ length: nt }, (_, i) => (i + 1) / nt);
+  stops.forEach((f, i) => {
+    const r = (i === nt - 1 ? 0.082 : i ? 0.068 : 0.072) * tf;
+    prims.push({ bone: 'tail', c: at(f), r: [r, r, r], kind: 0, color: i === nt - 1 ? C.tailTip : C.base, seam: 0 });
+  });
 
   let bones: Bone[] = [
     { name: 'root', parent: -1, head: [0, by, -L * 0.1], tail: [0, by, L * 0.3] },
@@ -109,7 +115,7 @@ uniform mat4 uInv[NB];      // posed model space -> each bone's rest space
 uniform vec4 uC[NP];        // rest centre, bone index
 uniform vec4 uR[NP];        // radii, kind (0 fur, 1 eye, 2 nose)
 uniform vec4 uCol[NP];      // colour, seam group (1 body, 2 muzzle)
-uniform vec3 uCam, uLight, uTint, uBMin, uBMax;
+uniform vec3 uCam, uLight, uTint, uBMin, uBMax, uEye, uNose;
 in vec3 vP;
 out vec4 outColor;
 
@@ -189,7 +195,7 @@ void main() {
   if (m.y > .5) { // button eyes and nose: dark and glossy
     vec3 hv = normalize(uLight + v);
     float spec = pow(max(dot(n, hv), 0.), 70.) * 1.4 + pow(1. - max(dot(n, v), 0.), 4.) * .25;
-    col = (m.y > 1.5 ? vec3(.16, .11, .1) : vec3(.07, .05, .045)) * (.5 + .5 * max(dot(n, uLight), 0.)) + spec;
+    col = (m.y > 1.5 ? uNose : uEye) * (.5 + .5 * max(dot(n, uLight), 0.)) + spec;
   } else {
     // short fur: jitter the normal, wrap the light around the form, brighten the grazing edge
     vec3 fz = vec3(noise(p * 85.), noise(p * 85. + 17.), noise(p * 85. + 31.)) - .5;
@@ -213,7 +219,7 @@ export class SdfPet {
   readonly bones: Bone[];
   readonly uniforms: {
     uBones: { value: THREE.Matrix4[] }; uInv: { value: THREE.Matrix4[] }; uC: { value: THREE.Vector4[] }; uR: { value: THREE.Vector4[] };
-    uCol: { value: THREE.Vector4[] }; uCam: { value: THREE.Vector3 }; uLight: { value: THREE.Vector3 }; uTint: { value: THREE.Vector3 };
+    uCol: { value: THREE.Vector4[] }; uCam: { value: THREE.Vector3 }; uLight: { value: THREE.Vector3 }; uTint: { value: THREE.Vector3 }; uEye: { value: THREE.Vector3 }; uNose: { value: THREE.Vector3 };
     uBMin: { value: THREE.Vector3 }; uBMax: { value: THREE.Vector3 };
   };
   private eyes: { i: number; ry: number }[] = [];
@@ -227,6 +233,7 @@ export class SdfPet {
     const pad = 0.4; // room for a swinging leg, a raised head, a wagging tail
     const min = new THREE.Vector3(...d.min).subScalar(pad), max = new THREE.Vector3(...d.max).addScalar(pad);
     this.size.set(d.max[0] - d.min[0], d.max[2] - d.min[2]);
+    const rgb = (hex: string) => { const c = new THREE.Color(hex).convertLinearToSRGB(); return new THREE.Vector3(c.r, c.g, c.b); };
     const bi = (n: string) => Math.max(0, d.bones.findIndex(b => b.name === n));
     this.uniforms = {
       uBones: { value: Array.from({ length: MAX_BONES }, () => new THREE.Matrix4()) },
@@ -235,6 +242,7 @@ export class SdfPet {
       uR: { value: d.prims.map(p => new THREE.Vector4(...p.r, p.kind)) },
       uCol: { value: d.prims.map(p => { const c = new THREE.Color(p.color).convertLinearToSRGB(); return new THREE.Vector4(c.r, c.g, c.b, p.seam); }) },
       uCam: { value: new THREE.Vector3() }, uLight: { value: new THREE.Vector3(0, 1, 0) }, uTint: { value: new THREE.Vector3(1, 1, 1) },
+      uEye: { value: rgb(traits.colors.eye) }, uNose: { value: rgb(traits.colors.nose) },
       uBMin: { value: min }, uBMax: { value: max },
     };
     d.prims.forEach((p, i) => { if (p.kind === 1) this.eyes.push({ i, ry: p.r[1] }); });
