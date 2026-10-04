@@ -4,10 +4,14 @@ import sharp from 'sharp';
 import type { Species } from './types.js';
 import { ApiError } from '../errors.js';
 
-/** Convert F1's pre-generated rest-pose splat into raw Gaussian PLY for its parsePly pipeline. */
+/**
+ * Convert F1's pre-generated rest-pose splat into a raw Gaussian PLY in TRELLIS's convention (up = -Y),
+ * so the client pipeline treats mock output exactly like the real provider's: a 180 deg rotation about X
+ * of the bundle's y-up frame. Cat and rodent reuse the dog bundle's shape.
+ */
 export async function mockPly(bundleDir: string, species: Species) {
-  if (species !== 'dog' && species !== 'bird') throw new ApiError(422, 'gen_failed', 'Mock generation supports dog and bird');
-  const splat = await readFile(join(bundleDir, species, 'pet.splat'));
+  const source = species === 'bird' ? 'bird' : 'dog';
+  const splat = await readFile(join(bundleDir, source, 'pet.splat'));
   if (!splat.length || splat.length % 32) throw new ApiError(500, 'gen_failed');
   const count = splat.length / 32;
   const names = ['x', 'y', 'z', 'scale_0', 'scale_1', 'scale_2', 'rot_0', 'rot_1', 'rot_2', 'rot_3', 'f_dc_0', 'f_dc_1', 'f_dc_2', 'opacity'];
@@ -16,11 +20,14 @@ export async function mockPly(bundleDir: string, species: Species) {
   for (let i = 0; i < count; i++) {
     const offset = i * 32; const out = i * names.length * 4;
     for (let j = 0; j < 3; j++) {
-      data.writeFloatLE(splat.readFloatLE(offset + j * 4), out + j * 4);
+      // position (x, y, z) -> (x, -y, -z): 180 deg about X
+      data.writeFloatLE((j === 0 ? 1 : -1) * splat.readFloatLE(offset + j * 4), out + j * 4);
       data.writeFloatLE(Math.log(Math.max(1e-8, splat.readFloatLE(offset + 12 + j * 4))), out + (3 + j) * 4);
       data.writeFloatLE((splat[offset + 24 + j] / 255 - .5) / .28209479, out + (10 + j) * 4);
     }
-    for (let j = 0; j < 4; j++) data.writeFloatLE((splat[offset + 28 + j] - 128) / 128, out + (6 + j) * 4);
+    // rotation q = (w, x, y, z) -> r * q with r = (0, 1, 0, 0) = (-x, w, -z, y)
+    const [w, x, y, z] = [0, 1, 2, 3].map(j => (splat[offset + 28 + j] - 128) / 128);
+    [-x, w, -z, y].forEach((v, j) => data.writeFloatLE(v, out + (6 + j) * 4));
     const alpha = Math.max(.00001, Math.min(.99999, splat[offset + 27] / 255));
     data.writeFloatLE(Math.log(alpha / (1 - alpha)), out + 13 * 4);
   }

@@ -72,7 +72,7 @@ export class MediaService {
   async startJob(userId: string, imageIds: string[], species: Species) {
     const hf = !this.config.MOCK_GEN && this.config.IMAGE_TO_3D_PROVIDER === 'hf';
     const images = await Promise.all(imageIds.map(id => this.imageBytes(userId, id)));
-    if (this.config.MOCK_GEN && species !== 'dog' && species !== 'bird') throw new ApiError(422, 'gen_failed', 'Mock generation supports dog and bird');
+    // MOCK_GEN serves the demo dog's shape for dog/cat/rodent and the bird bundle for birds (media/mock.ts).
     const id = randomUUID();
     const predictionId = this.config.MOCK_GEN ? null : hf ? `hf:${id}` : await this.providers.trellis(images.map(b => `data:image/png;base64,${b.toString('base64')}`));
     this.db.prepare('INSERT INTO gen_jobs (id,user_id,species,image_ids,status,prediction_id,created_at) VALUES (?,?,?,?,?,?,?)').run(id, userId, species, JSON.stringify(imageIds), 'pending', predictionId, Date.now());
