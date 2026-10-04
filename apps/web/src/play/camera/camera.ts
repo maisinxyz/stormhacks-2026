@@ -25,9 +25,10 @@ const VOICE_ERRORS: Record<string, string> = {
   'service-not-allowed': 'This browser blocks speech recognition. Use the command buttons under ⋯.',
   'audio-capture': 'No microphone found. Use the command buttons under ⋯.',
   network: 'Speech recognition could not reach its service (needs Chrome or Safari, online). Use the command buttons under ⋯.',
-  'no-speech': 'Did not hear anything. Hold the mic, speak, then release.',
+  'no-speech': 'Did not hear anything. Tap the mic, then speak.',
   'model-unavailable': 'The voice model could not be downloaded (needs internet once). Use the command buttons under ⋯.',
 };
+const LOOK_AROUND = new URLSearchParams(location.search).get('orient') === 'mouse';
 const CARRY_PX = 48;                         // a press on the dog that travels this far is a carry, not a stroke
 
 export class CameraView implements PlayView {
@@ -77,7 +78,7 @@ export class CameraView implements PlayView {
       this.alive = new Alive(e);
       this.tint = new AmbientTint(this.stream.video, e);
       this.xr = new XrTier(e, ctx.root, () => this.xrEnded());
-      this.voice = new PushToTalk(t => this.heard(t), code => this.ui.toast(VOICE_ERRORS[code] ?? `Voice error (${code}). Use the command buttons under ⋯.`, 6000), text => this.ui.toast(text, 4000));
+      this.voice = new PushToTalk(t => this.heard(t), code => this.ui.toast(VOICE_ERRORS[code] ?? `Voice error (${code}). Use the command buttons under ⋯.`, 6000), text => this.ui.toast(text, 4000), s => this.voiceState(s));
       this.ui = new CameraUi({
         back: () => ctx.switchTo('room'),
         flip: () => void this.stream.flip().catch(err => this.fail(err)),
@@ -88,8 +89,7 @@ export class CameraView implements PlayView {
         follow: () => this.follow(),
         swap: () => this.swapSide(),
         photo: f => void this.usePhoto(f),
-        micDown: () => { e.setListening(true); this.alive.focus(6); this.voice.start(); },
-        micUp: () => { e.setListening(false); this.voice.stop(); },
+        mic: () => this.voice.toggle(),
         ar: () => void this.toggleXr(),
         capture: () => void this.capture(),
       });
@@ -150,7 +150,7 @@ export class CameraView implements PlayView {
       this.ctx.emit?.({ type: 'view.error', view: 'camera', code: 'orientation_denied', message: 'Motion access denied' });
       this.ui.toast('Motion access is off, so turning the phone will not move the dog.', 6000);
     } else if (orient === 'mouse' || orient === 'unavailable') {
-      this.ui.toast(orient === 'mouse' ? 'Drag to look around (simulated motion).' : 'No motion sensor here. Drag to look around.');
+      if (orient === 'mouse') this.ui.toast('Drag to look around (simulated motion).');
     } else this.ui.toast('Move your phone. Tap the floor to place your dog.');
     this.ui.coach(); // first run only
     this.voice.warm();
@@ -255,6 +255,16 @@ export class CameraView implements PlayView {
     }
   }
 
+  /** The dog listens (head up, ears perked) from the moment the mic opens until it has a command, and the UI shows the stage. */
+  private voiceState(s: 'idle' | 'listening' | 'interpreting') {
+    this.ui.setVoice(s);
+    this.ctx.engine.setListening(s !== 'idle');
+    if (s !== 'idle') this.alive.focus(10);
+    window.clearInterval(this.levelTimer);
+    if (s === 'listening') this.levelTimer = window.setInterval(() => this.ui.micLevel(this.voice.micLevel), 60);
+  }
+  private levelTimer = 0;
+
   private swapSide() {
     this.following = false;
     this.side = -this.side as 1 | -1;
@@ -348,8 +358,8 @@ export class CameraView implements PlayView {
       const s = THREE.MathUtils.clamp(this.pinch.scale * (Math.hypot(a.x - b.x, a.y - b.y) / this.pinch.dist), SCALE_MIN, SCALE_MAX);
       this.zoom = s;
       this.ctx.engine.setPetScale(AR_PET_SCALE * s);
-    } else if (this.pts.size === 1 && p.path > TAP_PX && this.pose.simulated && !this.xr.active) {
-      this.pose.look(dx, dy); // no gyro: drag stands in for turning the phone
+    } else if (this.pts.size === 1 && p.path > TAP_PX && LOOK_AROUND && !this.xr.active) {
+      this.pose.look(dx, dy); // dev only (?orient=mouse): drag stands in for turning the phone. Off otherwise: the view never pans on a laptop
     }
   };
 

@@ -9,7 +9,8 @@ export interface CameraUiHandlers {
   swap(): void;
   /** A dog photo was chosen: make the plush pet from it. */
   photo(file: File): void;
-  micDown(): void; micUp(): void;
+  /** Mic button: toggles listening. */
+  mic(): void;
   /** Toggle true AR (WebXR). Only offered when the device supports it. */
   ar(): void;
   capture(): void;
@@ -21,6 +22,7 @@ export class CameraUi {
   private card = document.createElement('div');
   private chips = document.createElement('div');
   private mic: HTMLButtonElement;
+  private voiceEl = document.createElement('div');
   private arChip: HTMLButtonElement;
   private toastTimer = 0;
   private flash = document.createElement('div');
@@ -41,14 +43,10 @@ export class CameraUi {
     btn(this.el, 'cam-btn tl', 'Back', '‹', h.back);
     btn(this.el, 'cam-btn tr', 'Switch camera', '⇄', h.flip);
 
-    // mic: hold to talk (pointer events so it works for touch and mouse; Space/Enter for keyboard)
-    this.mic = btn(this.el, 'cam-btn bl', 'Hold to talk to your dog', '🎤');
-    const down = (e: Event) => { e.preventDefault(); if (e instanceof PointerEvent) try { this.mic.setPointerCapture(e.pointerId); } catch { /* no active pointer (synthetic event) */ } this.mic.classList.add('on'); h.micDown(); }; // captured: sliding off the button does not cut the recording
-    const up = () => { if (!this.mic.classList.contains('on')) return; this.mic.classList.remove('on'); h.micUp(); };
-    this.mic.addEventListener('pointerdown', down);
-    this.mic.addEventListener('pointerup', up); this.mic.addEventListener('pointercancel', up);
-    this.mic.addEventListener('keydown', e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(e); });
-    this.mic.addEventListener('keyup', e => { if (e.key === ' ' || e.key === 'Enter') up(); });
+    // mic: tap to start, tap again to stop (it also stops by itself). Space/Enter work because it is a button.
+    this.mic = btn(this.el, 'cam-btn bl', 'Talk to your dog: tap to start, tap again to stop', '🎤', h.mic);
+    this.voiceEl.className = 'cam-voice'; this.voiceEl.hidden = true; this.voiceEl.setAttribute('role', 'status');
+    this.el.appendChild(this.voiceEl);
 
     // "more": one chip that expands the quick actions
     const more = btn(this.el, 'cam-btn br', 'More actions', '⋯', () => {
@@ -94,6 +92,19 @@ export class CameraUi {
 
   showAr(supported: boolean) { this.arChip.hidden = !supported; }
   setAr(on: boolean) { this.arChip.textContent = on ? 'Exit AR' : 'True AR'; }
+  /** Voice state on screen: the mic pulses with the user's voice while listening, and an "Interpreting..." pill with moving
+   *  dots shows until the command is found, so the dog never looks like it is ignoring the user. */
+  setVoice(state: 'idle' | 'listening' | 'interpreting') {
+    this.mic.classList.toggle('on', state === 'listening');
+    this.mic.classList.toggle('busy', state === 'interpreting');
+    this.voiceEl.hidden = state === 'idle';
+    this.voiceEl.dataset.state = state;
+    this.voiceEl.textContent = state === 'listening' ? 'Listening' : 'Interpreting';
+    if (state === 'idle') this.mic.style.removeProperty('--lvl');
+  }
+  /** 0..1 loudness: makes the mic button swell with the voice. */
+  micLevel(v: number) { this.mic.style.setProperty('--lvl', v.toFixed(2)); }
+
   micEnabled(on: boolean) { this.mic.disabled = !on; this.mic.title = on ? '' : 'Voice is not supported in this browser'; }
 
   /** Shutter feedback: a brief flash and a thumbnail of the photo. */
