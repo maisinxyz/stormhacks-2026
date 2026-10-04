@@ -32,11 +32,11 @@ export class RoomHud {
       + `<div class="room-stats" aria-live="polite"><span class="room-hearts" data-hearts role="img"></span><span class="room-count" data-count></span></div>`
       + `<div class="room-cross" aria-hidden="true"></div><div class="room-charge" aria-hidden="true"><i></i></div>`
       + `<div class="room-hotbar" role="toolbar" aria-label="Held item">${ITEMS.map((it, i) => `<button data-item="${it.id}" aria-label="${it.label}" aria-pressed="false">${it.icon}<small>${touch ? it.label : i + 1}</small></button>`).join('')}</div>`
-      + `<button class="room-mic" data-action="mic" aria-label="Talk to your pet: tap to start, tap again to stop">🎤<small>${touch ? 'Talk' : 'T'}</small></button>`
+      + `<button class="room-mic" data-action="mic" aria-label="Talk to your pet: tap to start, tap again to stop">🎤<small>${touch ? 'Talk' : 'U'}</small></button>`
       + (touch ? `<button class="room-use" data-action="use" aria-label="Use the held item: hold to throw harder">Pet</button>` : '')
       + `<div class="cam-voice" role="status" hidden></div><div class="cam-toast" role="status"></div>`
       + `<div class="room-coach hide" data-coach></div>`
-      + `<div class="cam-help" data-ui="1" role="dialog" aria-label="Voice commands" hidden><h2>Say it to your pet</h2><p class="hint">Tap the mic${touch ? '' : ' (or press T)'}, then speak. It picks the closest command, so you do not need the exact words. Anything else gets a wag and hearts.</p><ul>${COMMANDS.filter(c => c.id !== 'stand').map(c => `<li>${c.label}</li>`).join('')}</ul><button type="button" class="primary" data-action="help-close">Got it</button></div>`;
+      + `<div class="cam-help" data-ui="1" role="dialog" aria-label="Voice commands" hidden><h2>Say it to your pet</h2><p class="hint">Tap the mic${touch ? '' : ' (or press U)'}, then speak. It picks the closest command, so you do not need the exact words. Anything else gets a wag and hearts.</p><ul>${COMMANDS.filter(c => c.id !== 'stand').map(c => `<li>${c.label}</li>`).join('')}</ul><button type="button" class="primary" data-action="help-close">Got it</button></div>`;
     const on = (action: string, fn: () => void) => this.q(`[data-action="${action}"]`).addEventListener('click', fn);
     on('back', h.back); on('camera', h.camera); on('mic', h.mic);
     on('help', () => this.help(this.q('.cam-help').hidden)); on('help-close', () => this.help(false));

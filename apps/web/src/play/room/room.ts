@@ -123,7 +123,7 @@ export class RoomView implements PlayView {
     const name = this.ctx!.session.bundle.name;
     const hints = touch
       ? ['Left thumb walks · drag on the right to look around', 'Pick an item below · hold the round button to throw harder', `Tap the mic and talk to ${name}: sit, come here, dance...`]
-      : ['Click to look around · WASD to walk · Esc to let go of the mouse', '1-4 picks an item · hold the mouse button to throw harder', `Press T and talk to ${name}: sit, come here, dance...`];
+      : ['Click to look around · WASD to walk · Esc to let go of the mouse', '1-4 picks an item · hold the mouse button to throw harder', `Press U and talk to ${name}: sit, come here, dance...`];
     try { if (localStorage.getItem('fetch.play.roomcoach')) hints.length = 1; else localStorage.setItem('fetch.play.roomcoach', '1'); } catch { /* private mode: show them every time */ }
     let i = -1, shown = 0, timer = 0;
     const next = () => {
@@ -141,7 +141,7 @@ export class RoomView implements PlayView {
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
     if (n >= 0) this.pick(ITEMS[n].id);
-    else if (e.code === 'KeyT') this.talk?.toggle();
+    else if (e.code === 'KeyU') this.talk?.toggle();
   };
   private pick(id: ItemId) { this.item = id; this.hud?.item(id); this.beg = 0.6; }
 

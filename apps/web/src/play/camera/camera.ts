@@ -119,6 +119,7 @@ export class CameraView implements PlayView {
     void (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> } | undefined)?.lock?.('portrait').catch(() => { /* not allowed here */ });
     this.pose.update(0);
     window.addEventListener('pointerdown', this.onDown);
+    window.addEventListener('keydown', this.onMicKey);
     window.addEventListener('pointermove', this.onMove);
     window.addEventListener('pointerup', this.onUp);
     window.addEventListener('pointercancel', this.onUp);
@@ -185,6 +186,7 @@ export class CameraView implements PlayView {
 
   exit() {
     window.removeEventListener('pointerdown', this.onDown);
+    window.removeEventListener('keydown', this.onMicKey);
     window.removeEventListener('pointermove', this.onMove);
     window.removeEventListener('pointerup', this.onUp);
     window.removeEventListener('pointercancel', this.onUp);
@@ -255,6 +257,9 @@ export class CameraView implements PlayView {
       this.ui.toast('Could not read that photo. Try another one.');
     }
   }
+
+  /** U toggles the microphone (same key as in the room). */
+  private onMicKey = (e: KeyboardEvent) => { if (e.code === 'KeyU' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !(e.target as HTMLElement | null)?.closest?.('input, textarea')) this.voice.toggle(); };
 
   /** The dog listens (head up, ears perked) from the moment the mic opens until it has a command, and the UI shows the stage. */
   private voiceState(s: 'idle' | 'listening' | 'interpreting') {
