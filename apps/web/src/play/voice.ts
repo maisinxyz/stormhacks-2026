@@ -3,7 +3,7 @@
 // shares a build with apps/desk.
 import type { LocalIntent } from '@fetch/contracts';
 
-export type VoiceCommand = { kind: 'intent'; intent: LocalIntent } | { kind: 'praise' } | { kind: 'feed' } | { kind: 'follow' };
+export type VoiceCommand = { kind: 'intent'; intent: LocalIntent } | { kind: 'praise' } | { kind: 'feed' } | { kind: 'follow' } | { kind: 'swap' };
 
 const TABLE: [RegExp, VoiceCommand][] = [
   [/\broll over\b/, { kind: 'intent', intent: 'roll_over' }],
@@ -11,6 +11,7 @@ const TABLE: [RegExp, VoiceCommand][] = [
   [/\b(fetch|get the ball|ball)\b/, { kind: 'intent', intent: 'fetch_ball' }],
   [/\bgood (boy|girl|pet|dog|bird)\b/, { kind: 'praise' }],
   [/\b(treat|feed|dinner|food)\b/, { kind: 'feed' }],
+  [/\b(other side|switch sides?|swap( sides?)?|move over)\b/, { kind: 'swap' }], // camera view: stand on the other side of the shot
   [/\bfollow\b/, { kind: 'follow' }], // camera view: keep in front of the user as they turn
   [/\bwake( up)?\b/, { kind: 'intent', intent: 'wake' }],
   [/\b(sleep|nap|bed ?time)\b/, { kind: 'intent', intent: 'sleep' }],

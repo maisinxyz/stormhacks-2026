@@ -6,6 +6,7 @@ export interface CameraUiHandlers {
   /** A command chip: the same intents voice produces, for when speech recognition is unavailable. */
   command(intent: LocalIntent): void;
   follow(): void;
+  swap(): void;
   micDown(): void; micUp(): void;
   /** Toggle true AR (WebXR). Only offered when the device supports it. */
   ar(): void;
@@ -58,6 +59,7 @@ export class CameraUi {
     for (const [label, intent] of [['Sit', 'sit'], ['Stand', 'stop'], ['Stay', 'stay'], ['Come', 'come'], ['Spin', 'spin'], ['Roll over', 'roll_over']] as [string, LocalIntent][])
       btn(this.chips, 'cam-chip', label, label, () => h.command(intent));
     btn(this.chips, 'cam-chip', 'Follow me as I turn', 'Follow', h.follow);
+    btn(this.chips, 'cam-chip', 'Stand on the other side of the shot', 'Swap side', h.swap);
     btn(this.chips, 'cam-chip', 'Give a treat', 'Treat', h.treat);
     btn(this.chips, 'cam-chip', 'Throw the ball', 'Ball', h.ball);
     btn(this.chips, 'cam-chip', 'Recenter the dog in front of you', 'Recenter', h.recenter);
@@ -70,6 +72,7 @@ export class CameraUi {
     this.thumb.className = 'cam-thumb'; this.thumb.alt = 'Last photo'; this.thumb.hidden = true;
     this.coachEl.className = 'cam-coach'; this.coachEl.hidden = true;
     this.coachEl.innerHTML = '<p>Move your phone. Your dog is here.</p><p class="tip">Tap the floor to place it <span aria-hidden="true">↓</span></p>'
+      + '<p class="tip">It stands to the side so you stay in the shot. Swap sides under ⋯.</p>'
       + '<p class="tip">It stays put when you turn. It cannot hide behind things or follow you walking.</p>'; // honest limits of the gyro tier (B.14)
     const grain = document.createElement('div'); // light film grain over feed + dog so the dog is not cleaner than the camera (B.8)
     grain.className = 'cam-grain';

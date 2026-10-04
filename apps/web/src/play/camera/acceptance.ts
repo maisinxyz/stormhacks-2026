@@ -156,6 +156,17 @@ export async function run(shell: PlayShell) {
       seen.size > 40 && yawRange > 0.2 && moved < 0.01 && calm && held && stood && followed && stayed,
       `${seen.size}/60 distinct poses in 6 s idle, head yaw range ${yawRange.toFixed(2)} rad, moved ${moved.toFixed(3)} m after a jolt + 4.5 s out of frame (state ${calm ? 'idle' : 'not idle'}), sit held 6 s: ${held}, "stop" stands: ${stood}, "follow me" + 60 deg turn -> back in front: ${followed}, "stay there" + turn back -> did not move: ${stayed} [synthetic sensor]`);
 
+    // side placement: clear of the user, faces the centre, swaps on command
+    cam.pose.recenter(); orient(55, 68); await sleep(600); cam.side = 1; cam.placeSide(false); await sleep(500);
+    const sideR = ndc().x, faceR = e.beh.dir;
+    cam.heard('other side'); await sleep(200); await until(() => !e.travelling, 9000); await sleep(400);
+    const sideL = ndc().x, faceL = e.beh.dir;
+    cam.side = 1; try { sessionStorage.removeItem('fetch.play.side'); } catch { /* ignore */ }
+    e.doIntent('stop'); e.placePet(0, 0, false); await sleep(300);
+    add('side', 'B.6 dog stands at the side of the shot, in frame, facing the centre; "other side" swaps',
+      sideR > 0.25 && sideR < 0.85 && faceR === -1 && sideL < -0.25 && sideL > -0.85 && faceL === 1,
+      `screen x ${sideR.toFixed(2)} on the right facing ${faceR === -1 ? 'left' : 'right'}; after "other side" x ${sideL.toFixed(2)} facing ${faceL === 1 ? 'right' : 'left'} (aspect ${(innerWidth / innerHeight).toFixed(2)}; portrait checked by screenshot only)`);
+
     // B13-7: voice -> local intents
     cam.pose.recenter(); orient(55 + 110, 68); await sleep(300);
     const table: [string, string][] = [['sit', 'sit'], ['roll over', 'roll_over'], ['play dead', 'play_dead'], ['can you dance', 'dance'], ['spin around', 'spin'], ['stay there', 'stay'], ['come here', 'come'], ['go to sleep', 'sleep'], ['wake up', 'wake'], ['shake', 'shake'], ['hide', 'hide'], ['fetch the ball', 'fetch_ball'], ['stop', 'stop'], ['stand up', 'stop'], ['sit down', 'sit']];

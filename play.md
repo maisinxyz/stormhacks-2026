@@ -447,6 +447,7 @@ Works on iOS and Android with no AR support.
 - **Glance behavior:** the dog looks at the camera for 1–3 s, then away at a random point, at irregular intervals. Head only.
 - **Reacts without moving:** a tap or stroke gives the wag reaction; speaking holds its attention. It does not react to phone jolts and does not walk back when out of frame (both removed: they moved the dog with no command, and broke held poses).
 - **Poses hold:** `sit`, `stay`, `play_dead`, `hide` and `sleep` last until the next command. "Stand", "stop", "get up" or the Stand chip end them.
+- **Stands at the side:** on enter and on Recenter the dog goes to the outer side of the shot (right by default) and faces the centre, so it does not cover the user on a front camera or webcam. The spot is worked out from the screen shape: on a narrow portrait phone the dog stands farther back (up to 5 m), and only shrinks if it still does not fit. "Swap side" (chip, or say "other side" / "move over") walks it across; the side is remembered for the session. It does not dodge by itself if the user leans into it.
 - **Follow:** "follow" (voice or chip) makes the dog walk to stay in front of the user when they turn more than about 14°, at its current distance. Any other command, a floor tap or recenter ends it. "Stay there" ends it and holds the dog where it is.
 
 ### B.7 Interaction in the camera view
@@ -457,7 +458,7 @@ Works on iOS and Android with no AR support.
 | **Tap the floor** | `POINT`: the dog walks there |
 | **Pinch** | Scale the dog |
 | **Mic (hold to talk)** | Browser speech recognition → local intents (`sit`, `stay`, `come`, `speak`, `roll_over`, `spin`, `play_dead`, `shake`, `dance`, `hide`, `sleep`, `wake`, `stop`/"stand") plus "follow" → `engine.doIntent`. A failure shows the real reason (blocked mic, no speech service, nothing heard), never a generic message. Server-side transcription is the next step if the target browser has no speech service |
-| **Action chips** | Sit, Stand, Stay, Come, Spin, Roll over, Follow, Treat, Ball, Recenter. The command chips are the fallback when speech is unavailable; they do not count as voice working |
+| **Action chips** | Sit, Stand, Stay, Come, Spin, Roll over, Follow, Swap side, Treat, Ball, Recenter. The command chips are the fallback when speech is unavailable; they do not count as voice working |
 | **Capture** | See B.9 |
 
 The existing `Interactions` window listeners keep working; Person B only needs the camera view's `toWorld` mapping to use the virtual ground plane (`setGroundPlane`) and the camera pose.
@@ -525,7 +526,8 @@ Measured by `/camera.html?pet=dog&accept=camera` (`src/play/camera/acceptance.ts
 - [ ] Voice commands trigger the matching local intents. *15/15 phrases map correctly and "please sit" plays the sit clip, but through the parser only. With a real microphone the user got an error; unresolved until the phone test.*
 - [x] Capture produces the camera frame plus the dog with no UI in it. *0 px differ under the controls. Share sheet / download not exercised.*
 - [x] Switching Camera ↔ Room five times releases the camera and leaks nothing; the dog keeps its state. *0 live tracks in the Room, 0 leaked layers or handlers.*
-- [ ] 30+ fps in the camera view at the `low` preset on a mid-range phone. *60 fps on the desktop with the 10.8k-splat placeholder; not a phone measurement.*
+- [x] The dog stands at the side of the shot, fully in frame, facing the centre; "other side" swaps it. *Screen x 0.52 on the right facing left, -0.52 after the swap facing right (landscape). Portrait (430x900) checked by screenshot: the dog stands 4.5 m back and fits the right half.*
+- [ ] 30+ fps in the camera view at the `low` preset on a mid-range phone. **At risk:** with the real golden-retriever bundle (120k splats drawn at `low`) the desktop harness measures about 30 fps, down from 60 fps with the 10.8k placeholder, and the render scale had already dropped to 1.0. Not measured on a phone.
 - [ ] WebXR: not run, and out of scope for the current target devices.
 
 **Success test agreed with the owner (must be shown on a phone):** I say "sit" and the dog sits and stays sat; it stands on the floor and does not move unless I tell it to; I take a photo and the dog looks natural in it.
@@ -542,6 +544,7 @@ Measured by `/camera.html?pet=dog&accept=camera` (`src/play/camera/acceptance.ts
 | Capture reads a blank canvas | Render and `drawImage` in the same task; harness check | Built and checked |
 | Dog does not look like it belongs in the scene | Tint, body-shaped shadow, paw contact decals, grain, 0.9 m scale | Built. The floor is an assumed plane 1.4 m below the phone, so on a webcam that does not see the floor the dog still stands in mid-air |
 | Splat shader needs per-view projection in XR | Isolated in `SplatMesh.update`; non-XR focal length checked unchanged | Built; XR itself never run |
+| The dog covers the user on a front camera | Side placement worked out from the screen shape, swap-side control, drag and tap-to-place | Built. No face/body detection: it will not dodge if the user leans into it. Phase 2 if needed: MediaPipe selfie segmentation (vendored, front camera only) to pick the free area and step aside, auto-disabled below 25 fps |
 | Phone screen rotation | Portrait lock attempted (browsers usually refuse outside fullscreen); the pose reads the live screen angle | Built; landscape untested on a phone |
 
 ---

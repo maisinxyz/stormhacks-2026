@@ -63,6 +63,11 @@ export class Engine implements PetEngine {
   private groundPlane = 0;
   private paws: { mesh: THREE.Mesh; bone: number; tip: THREE.Vector3 }[] = []; // small dark decal under each foot (contact cue)
   private shadowOpacity = 1;
+  private petFootprint = new THREE.Vector2(1, 1);
+  /** Rest-pose body footprint (x width, y = z length) of the loaded pet, unscaled. */
+  get footprint() { return this.petFootprint; }
+  /** Turn the idle pose toward +x (1) or -x (-1); the walk cycle sets this on its own while travelling. */
+  facePet(sign: 1 | -1) { this.beh?.face(sign); }
   private shadowSize = new THREE.Vector2(1, 1); // body footprint (x width, z length) relative to the 1.2 m decal
   private petScale = 1;
   private overlay?: THREE.Scene;
@@ -143,7 +148,8 @@ export class Engine implements PetEngine {
       this.scene.add(mesh);
       return [{ mesh, bone, tip: new THREE.Vector3(...b.tail) }];
     });
-    this.shadowSize.copy(this.splat.footprint()).multiplyScalar(1.25 / 1.2); // decal is a 1.2 m quad; a little larger than the body
+    this.petFootprint.copy(this.splat.footprint());
+    this.shadowSize.copy(this.petFootprint).multiplyScalar(1.25 / 1.2); // decal is a 1.2 m quad; a little larger than the body
     if (this.listeningPending) this.beh.setListening(true);
   }
 

@@ -59,6 +59,9 @@ export class Behavior {
 
   // ---------- public inputs ----------
   setMode(m: Mode) { this.mode = m; if (this.state === 'idle' || this.state === 'play') this.start(this.idle(), m === 'play' ? 'play' : 'idle'); }
+  /** Turn the idle pose toward +x (1) or -x (-1). Applied now, and again when a walk in progress arrives (walking faces the way it travels). */
+  face(sign: 1 | -1) { this.dir = this.arriveDir = sign; }
+  private arriveDir?: 1 | -1;
   setAutonomous(on: boolean) { this.autonomous = on; if (this.state === 'idle' || this.state === 'play') this.start(this.idle(), this.state); }
   setListening(on: boolean) {
     this.listening = on;
@@ -365,6 +368,7 @@ export class Behavior {
   }
 
   pointTo(x: number, z = this.z) {
+    this.arriveDir = undefined;
     if (this.state === 'exit' || this.state === 'working' || this.state === 'return' || this.state === 'approval') return;
     this.start(this.pointRoutine(x, z), 'intent');
   }
@@ -377,6 +381,7 @@ export class Behavior {
 
   private *pointRoutine(x: number, z = this.z): Routine {
     yield* this.walkTo(x, z, Math.hypot(x - this.x, z - this.z) > 1.5);
+    if (this.arriveDir) this.dir = this.arriveDir;
     // dog/cat sniff or sit at the target; bird just settles
     yield* this.play(this.pack.id === 'bird' ? 'perch' : this.pick(['sniff', 'sit']), rand(1.5, 3));
   }

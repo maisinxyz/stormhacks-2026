@@ -8,7 +8,7 @@ import type { PlayContext, PlayView, PlayViewId } from '../types';
 import { Alive } from './lookat';
 import './camera.css';
 import { composite, deliver } from './capture';
-import { PhonePose } from './pose';
+import { CAMERA_FOV, PhonePose, START_DISTANCE } from './pose';
 import { CameraStream, StreamError } from './stream';
 import { AmbientTint } from './tint';
 import { CameraUi } from './ui';
@@ -43,6 +43,8 @@ export class CameraView implements PlayView {
   private zoom = 1;
   /** "Follow": the dog walks to stay in front of the user as they turn. Any other command ends it. */
   private following = false;
+  /** Which side of the shot the dog stands on (+1 right, -1 left). Remembered for the session. */
+  private side: 1 | -1 = (() => { try { return sessionStorage.getItem('fetch.play.side') === '-1' ? -1 : 1; } catch { return 1; } })();
   private entered = false;
   private frame?: XRFrame;
   // gesture state: pointers that did NOT start on the pet or on UI
@@ -82,6 +84,7 @@ export class CameraView implements PlayView {
         ball: () => e.doIntent('fetch_ball'),
         command: i => { this.following = false; this.alive.focus(2.5); e.doIntent(i); },
         follow: () => this.follow(),
+        swap: () => this.swapSide(),
         micDown: () => { e.setListening(true); this.alive.focus(6); this.voice.start(); },
         micUp: () => { e.setListening(false); this.voice.stop(); },
         ar: () => void this.toggleXr(),
@@ -108,7 +111,7 @@ export class CameraView implements PlayView {
     e.setAutonomous(false);          // the dog only moves on a command here (voice, chips, tap, drag)
     e.setSplatDepthTest(false);      // no real depth in AR: the dog always draws over the video
     e.setGroundPlane(0);
-    e.placePet(0, 0, false);         // the dog starts at the anchor, about 2 m in front of the user
+    this.placeSide(false);           // the dog starts at the side of the view, clear of the user
     // Prefer portrait. Browsers only allow the lock in fullscreen / installed apps, so a refusal is expected and fine:
     // PhonePose reads the live screen angle on every sensor event, so landscape still tracks correctly.
     void (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> } | undefined)?.lock?.('portrait').catch(() => { /* not allowed here */ });
@@ -209,10 +212,34 @@ export class CameraView implements PlayView {
   }
   resize() { /* engine resizes its canvas; video is CSS object-fit: cover */ }
 
+  /** Default spot: the outer side of the view, so the dog does not cover the user. The spot is worked out from the
+   *  screen: the dog is long and stands 3/4 on, so on a narrow portrait phone it only fits at the side if it stands
+   *  farther back (or, failing that, smaller). It faces the centre. No face/body detection (phase 2, play.md B.14).
+   *  ponytail: fixed side; it will not dodge if the user leans into it, they swap sides or drag it. */
+  private placeSide(walk: boolean) {
+    const e = this.ctx.engine, f = e.footprint, k = Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV / 2)) * e.camera.aspect;
+    const width = (s: number) => (f.y * 0.65 + f.x * 0.75) * s; // on-screen width of the dog at scale s (m), standing 3/4 on
+    let s = AR_PET_SCALE * this.zoom, d = START_DISTANCE;
+    while (d < PLACE_MAX && width(s) > 0.8 * d * k) d += 0.25;  // fit in the outer 40% of the frame
+    if (width(s) > 0.8 * d * k) s = Math.max(AR_PET_SCALE * 0.5, 0.8 * d * k / width(1));
+    this.zoom = s / AR_PET_SCALE; e.setPetScale(s);
+    const half = d * k, x = this.side * (half - width(s) / 2 - 0.06 * half);
+    e.placePet(x, START_DISTANCE - d, walk);
+    e.facePet(-this.side as 1 | -1); // toward the centre (after the walk, if it is walking there)
+  }
+
+  private swapSide() {
+    this.following = false;
+    this.side = -this.side as 1 | -1;
+    try { sessionStorage.setItem('fetch.play.side', String(this.side)); } catch { /* private mode */ }
+    this.placeSide(true);
+    this.alive.focus(2);
+  }
+
   private recenter() {
     this.following = false;
     if (this.xr.active) { const g = this.inViewGround(); if (g) this.ctx.engine.placePet(g.x, g.z, false); }
-    else { this.pose.recenter(); this.ctx.engine.placePet(0, 0, false); } // dog back in front of the user
+    else { this.pose.recenter(); this.placeSide(true); } // dog back to its spot at the side of the view
     this.alive.focus(2);
     this.ui.toast('Recentered.');
   }
@@ -224,6 +251,7 @@ export class CameraView implements PlayView {
     this.alive.focus(2.5);
     this.following = false;
     if (c.kind === 'follow') this.follow();
+    else if (c.kind === 'swap') this.swapSide();
     else if (c.kind === 'intent') e.doIntent(c.intent);
     else if (c.kind === 'praise') e.react('tap');
     else e.feed();
@@ -248,7 +276,7 @@ export class CameraView implements PlayView {
   private xrEnded() {
     this.ui.setAr(false);
     if (!this.entered) return;
-    this.ctx.engine.placePet(0, 0, false);
+    this.placeSide(false);
     this.pose.recenter();
     void this.stream.start().catch(e => this.fail(e)); // back to the gyro tier without a reload
   }
@@ -338,14 +366,18 @@ export class CameraView implements PlayView {
   /** While following: when the user has turned more than ~14 deg away, walk to the same distance straight ahead of them. */
   private followStep() {
     const e = this.ctx.engine, cam = e.camera;
-    if (e.travelling) return;
-    const p = e.petPosition, dx = p.x - cam.position.x, dz = p.z - cam.position.z;
+    // Compare against where the dog is heading (if it is already walking), so a longer turn re-aims the walk instead
+    // of finishing a stale one first.
+    const p = e.travelling && this.followTo ? this.followTo : e.petPosition, dx = p.x - cam.position.x, dz = p.z - cam.position.z;
     const f = cam.getWorldDirection(new THREE.Vector3());
     const fl = Math.hypot(f.x, f.z), dist = THREE.MathUtils.clamp(Math.hypot(dx, dz), PLACE_MIN, PLACE_MAX);
     if (fl < 0.2) return; // looking straight up or down: no heading
     const cos = (dx * f.x + dz * f.z) / (fl * (Math.hypot(dx, dz) || 1));
-    if (cos < 0.97) e.placePet(cam.position.x + f.x / fl * dist, cam.position.z + f.z / fl * dist, true);
+    if (cos >= 0.97) return;
+    this.followTo = new THREE.Vector3(cam.position.x + f.x / fl * dist, 0, cam.position.z + f.z / fl * dist);
+    e.placePet(this.followTo.x, this.followTo.z, true);
   }
+  private followTo?: THREE.Vector3;
 
   /** A floor point comfortably inside the current view (lower-middle of the screen). */
   private inViewGround() {
