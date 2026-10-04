@@ -24,8 +24,13 @@ export function requireUser(config: B1Config, store: B1Store): preHandlerHookHan
     }
 
     let user = await store.getUser(userId);
+    if (!user && userId !== config.demoUserId) {
+      // Unknown user (e.g. in-memory store after a restart): demo fallback unless login is required.
+      if (config.requireLogin) return reply.code(401).send({ error: 'auth_required' });
+      userId = config.demoUserId;
+      user = await store.getUser(userId);
+    }
     if (!user) {
-      if (userId !== config.demoUserId) return reply.code(401).send({ error: 'auth_required' });
       user = { id: userId, name: 'Demo User', createdAt: new Date().toISOString() };
       await store.upsertUser(user);
     }

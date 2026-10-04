@@ -5,7 +5,7 @@ import { stubMedia, stubPets } from './devStubs';
 
 export async function buildB1App(overrides: Partial<B1Options> = {}, logger = false) {
   const app = Fastify({ logger });
-  const ctx = await registerB1(app, { pets: stubPets, media: stubMedia, ...overrides });
+  const b1 = await registerB1(app, { pets: stubPets, media: stubMedia, ...overrides });
   await app.ready();
-  return { app, ctx };
+  return { app, ...b1 };
 }

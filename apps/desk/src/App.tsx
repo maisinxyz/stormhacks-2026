@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent, ReactNode } from 'react'
 import { Bell, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, ExternalLink, FileText, Inbox, LayoutGrid, Mail, Mic, MoreHorizontal, PawPrint, Plus, Search, Send, Settings, Sparkles, SlidersHorizontal, Trash2, Volume2, X } from 'lucide-react'
-import type { LocalIntent, Mode, PetBundle, RunEvent, Species } from './contracts'
+import type { LocalIntent, Mode, PetBundle, PlatformRect, RunEvent, Species } from './contracts'
 import { MockPetEngine } from './mockEngine'
 import { getSpeechRecognition, speakWithBrowserTts, unlockMicrophone } from './voice'
 import { FetchApiClient, type ApprovalState, type NotificationItem, type RunState, type SettingsState } from './api'
@@ -19,6 +19,12 @@ const windows = [
   { id: 'files', title: 'Files', eyebrow: 'Your workspace', icon: FileText, className: 'window-files' },
   { id: 'calendar', title: 'Calendar', eyebrow: 'Today · Tue 14', icon: CalendarDays, className: 'window-calendar' },
 ]
+type DeskRect = PlatformRect & { zIndex?: number }
+const initialWindowRects: Record<string, DeskRect> = {
+  inbox: { id: 'inbox', x: 50, y: 89, w: 265, h: 215, kind: 'window' },
+  files: { id: 'files', x: 72, y: 328, w: 294, h: 190, kind: 'window' },
+  calendar: { id: 'calendar', x: 0, y: 100, w: 263, h: 170, kind: 'window' },
+}
 
 function App() {
   const store = useFetchStore(demoPet)
@@ -35,6 +41,8 @@ function App() {
   const [showRunLog, setShowRunLog] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [windowRects, setWindowRects] = useState(initialWindowRects)
+  const [windowOrder, setWindowOrder] = useState(['inbox', 'files', 'calendar'])
   const api = useMemo(() => new FetchApiClient(), [])
   const engine = useMemo(() => new MockPetEngine(), [])
   const mainCanvas = useRef<HTMLCanvasElement>(null)
@@ -44,11 +52,18 @@ function App() {
   const setListening = (value: boolean) => setVoice({ listening: value })
   const setSpeaking = (value: boolean) => setVoice({ speaking: value })
   const setMicAvailable = (value: boolean) => setVoice({ micAvailable: value })
+  const openNotifications = () => { if (mode === 'play') { setToast('Notifications are off in Play mode'); return } setShowNotifications(true); void api.getNotifications().then(setNotifications) }
 
   useEffect(() => {
     if (mainCanvas.current && peekCanvas.current) engine.mount(mainCanvas.current, peekCanvas.current)
     if (pet) engine.loadPet(pet)
   }, [engine, pet])
+
+  useEffect(() => {
+    const worldWidth = document.querySelector('.canvas-world')?.clientWidth ?? 900
+    const rects = Object.values(windowRects).map((rect) => ({ ...rect, x: rect.id === 'calendar' ? Math.max(20, worldWidth - rect.w - 40) : rect.x }))
+    engine.setPlatforms(rects)
+  }, [engine, windowRects])
 
   const setDeskMode = (next: Mode) => {
     const activeRun = appState.runs.find((run) => run.status === 'running' || run.status === 'approval')
@@ -125,14 +140,19 @@ function App() {
     window.addEventListener('keydown', down); window.addEventListener('keyup', up)
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
   })
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setShowRunLog(false); setShowNotifications(false); setShowSettings(false); setShowOnboarding(false) } }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [])
 
-  return <div className="app-shell">
+  return <div className={`app-shell theme-${appState.settings.theme} ${appState.settings.reduceMotion ? 'reduce-motion' : ''}`}>
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark"><PawPrint size={18} /></span><span>fetch</span><span className="brand-dot" /></div>
       <div className="workspace-label">Your desk</div>
       <nav className="nav-list" aria-label="Primary navigation">
         <button className="nav-item active"><LayoutGrid size={17} /> Desk <span className="nav-hotkey">⌘1</span></button>
-        <button className="nav-item" onClick={() => { setShowNotifications(true); void api.getNotifications().then(setNotifications) }}><Bell size={17} /> Notifications <span className="badge">{appState.notifications.filter((item) => item.unread).length || 3}</span></button>
+        <button className="nav-item" onClick={openNotifications}><Bell size={17} /> Notifications <span className="badge">{appState.notifications.filter((item) => item.unread).length || 3}</span></button>
       </nav>
       <div className="sidebar-divider" />
       <div className="workspace-label">Pets</div>
@@ -146,15 +166,16 @@ function App() {
     <main className="desk" onClick={() => setActiveWindow('desk')}>
       <header className="topbar">
         <div className="breadcrumb"><span>Desk</span><span className="slash">/</span><span className="muted">Tuesday, October 14</span></div>
-        <div className="top-actions"><span className="connection-pill"><span className="online-dot" /> All systems good</span><button className="icon-button" aria-label="Search"><Search size={18} /></button><button className="icon-button" aria-label="Notifications" onClick={() => { setShowNotifications(true); void api.getNotifications().then(setNotifications) }}><Bell size={18} /><span className="notification-dot" /></button></div>
+        <div className="top-actions"><span className="demo-pill"><span className="demo-dot" /> Demo mode</span><span className="connection-pill"><span className="online-dot" /> All systems good</span><button className="icon-button" aria-label="Search"><Search size={18} /></button><button className="icon-button" aria-label="Notifications" onClick={openNotifications}><Bell size={18} /><span className="notification-dot" /></button></div>
       </header>
       <section className="desk-canvas" aria-label="Fetch Desk workspace">
         <div className="desk-heading"><div><span className="eyebrow">Good morning, Vince</span><h1>What should we fetch?</h1></div><div className="mode-switch" role="group" aria-label="Mode"><button className={mode === 'work' ? 'selected' : ''} onClick={(e) => { e.stopPropagation(); setDeskMode('work') }}>Work</button><button className={mode === 'play' ? 'selected play-selected' : ''} onClick={(e) => { e.stopPropagation(); setDeskMode('play') }}><Sparkles size={14} /> Play</button></div></div>
+        {mode === 'play' && <div className="connectors-banner"><Sparkles size={14} /><span><strong>Play mode</strong> · Gmail, Drive, and Calendar are taking a nap.</span><button onClick={() => setDeskMode('work')}>Return to Work</button></div>}
         <div className={`command-bar ${listening ? 'listening' : ''} ${speaking ? 'speaking' : ''}`} onClick={(e) => e.stopPropagation()}><button className="command-icon mic-button" onClick={listening ? stopListening : startListening} aria-label={listening ? 'Stop listening' : 'Start listening'}><Mic size={19} /></button><input value={command} onChange={(e) => setCommand(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendCommand()} placeholder={listening ? 'Listening…' : mode === 'work' ? 'Ask Pip to find, read, or organise something…' : 'Tell Pip what to play…'} aria-label="Command Pip" /><span className="command-hint">{listening ? 'Listening' : <>Hold <kbd>Space</kbd> to talk</>}</span><button className="command-submit" onClick={sendCommand} aria-label="Send command"><ChevronDown size={18} className="send-chevron" /></button></div>
         <div className="canvas-world">
           <div className="sun-wash" /><div className="world-note"><span className="note-pin" /> Pip is perched on your Desk <button aria-label="Dismiss note">×</button></div>
-          {windows.map(({ id, title, eyebrow, icon: Icon, className }) => <DeskWindow key={id} id={id} title={title} eyebrow={eyebrow} Icon={Icon} className={className} active={activeWindow === id} onActivate={() => setActiveWindow(id)} mode={mode} />)}
-          <div className="pet-stage" aria-label={`${pet?.name ?? 'Your pet'} is perched on the desk`}><div className="pet-shadow" /><div className="pet-glow" /><div className="pet-illustration">{pet?.species === 'bird' ? '✦' : '◒'}</div><div className="pet-bubble">{mode === 'work' ? 'Ready when you are.' : 'Play with me!'}</div><canvas ref={mainCanvas} className="engine-canvas" /><div className="pet-nameplate"><span className="status-dot" />{pet?.name ?? 'New pet'} <span>·</span> <span className="muted">{engine.getStatus()}</span></div></div>
+          {windows.map(({ id, title, eyebrow, icon: Icon, className }) => <DeskWindow key={id} id={id} title={title} eyebrow={eyebrow} Icon={Icon} className={className} rect={windowRects[id]} zIndex={windowOrder.indexOf(id) + 2} active={activeWindow === id} onActivate={() => { setActiveWindow(id); setWindowOrder((order) => [...order.filter((item) => item !== id), id]) }} onRectChange={(rect) => setWindowRects((current) => ({ ...current, [id]: { ...current[id], ...rect } }))} mode={mode} />)}
+          <div className="pet-stage" aria-label={`${pet?.name ?? 'Your pet'} is perched on the desk`}><div className="pet-shadow" /><div className="pet-glow" /><div className="pet-illustration">{pet?.species === 'bird' ? '✦' : '◒'}</div>{appState.settings.subtitles && <div className="pet-bubble">{mode === 'work' ? 'Ready when you are.' : 'Play with me!'}</div>}<canvas ref={mainCanvas} className="engine-canvas" /><div className="pet-nameplate"><span className="status-dot" />{pet?.name ?? 'New pet'} <span>·</span> <span className="muted">{engine.getStatus()}</span></div></div>
           <button className="peek-dock" onClick={(e) => { e.stopPropagation(); setShowRunLog(true) }}><div className="peek-header"><span><span className="peek-live" /> Peek</span><span className="peek-open-label">Open log ↗</span></div><canvas ref={peekCanvas} /><div className="peek-scene"><span className="peek-pet">✦</span><span className="peek-copy"><strong>{appState.runs[0]?.status === 'running' ? 'Pip is on it' : 'Run log is ready'}</strong><small>{appState.runs[0]?.status === 'running' ? 'Working in the background' : 'Click to see recent errands'}</small></span></div></button>
         </div>
         <div className="desk-footer"><div className="tray treat-tray"><span className="tray-icon">✺</span><span><strong>Treat tray</strong><small>Drag to Pip</small></span><span className="treats">● ● ●</span></div><div className="tray toy-tray"><span className="tray-icon">◉</span><span><strong>Toy box</strong><small>Make playtime</small></span><span className="toys">◌ ◇</span></div><div className="desk-tip"><Sparkles size={14} /> Try “find my budget sheet”</div></div>
@@ -170,8 +191,12 @@ function App() {
   </div>
 }
 
-function DeskWindow({ id, title, eyebrow, Icon, className, active, onActivate, mode }: { id: string; title: string; eyebrow: string; Icon: typeof Inbox; className: string; active: boolean; onActivate: () => void; mode: Mode }) {
-  return <article className={`desk-window ${className} ${active ? 'active' : ''} ${mode === 'play' ? 'dimmed' : ''}`} onClick={(e) => { e.stopPropagation(); onActivate() }}><div className="window-top"><div className="window-title"><span className="window-icon"><Icon size={16} /></span><span><small>{eyebrow}</small><strong>{title}</strong></span></div><button className="window-menu" aria-label={`${title} menu`}><MoreHorizontal size={17} /></button></div>{id === 'inbox' && <div className="window-body inbox-body"><div className="mail-row unread"><span className="mail-avatar blue">AM</span><span><strong>Alex Morgan</strong><small>Standup notes · 9:42 AM</small></span><span className="mail-dot" /></div><div className="mail-row"><span className="mail-avatar peach">JT</span><span><strong>Jamie Tan</strong><small>Re: launch checklist</small></span></div><div className="mail-row"><span className="mail-avatar lilac">NS</span><span><strong>Notion</strong><small>Your weekly digest</small></span></div><div className="window-link">Open inbox <span>↗</span></div></div>}{id === 'files' && <div className="window-body file-body"><div className="file-hero"><FileText size={18} /><span><strong>Budget · Q4 2025</strong><small>Updated 12 minutes ago</small></span><span className="file-chip">XLSX</span></div><div className="file-line" /><div className="file-small"><span>My Drive</span><span>24 items <ChevronDown size={13} /></span></div><div className="window-link">Open files <span>↗</span></div></div>}{id === 'calendar' && <div className="window-body calendar-body"><div className="calendar-event"><span className="event-time">10:30</span><span className="event-line" /><span><strong>Product sync</strong><small>Google Meet · 30 min</small></span></div><div className="calendar-event next"><span className="event-time">14:00</span><span className="event-line" /><span><strong>Focus time</strong><small>Deep work block</small></span></div><div className="window-link">Open calendar <span>↗</span></div></div>}</article>
+function DeskWindow({ id, title, eyebrow, Icon, className, rect, zIndex, active, onActivate, onRectChange, mode }: { id: string; title: string; eyebrow: string; Icon: typeof Inbox; className: string; rect: DeskRect; zIndex: number; active: boolean; onActivate: () => void; onRectChange: (rect: Partial<DeskRect>) => void; mode: Mode }) {
+  const dragStart = useRef<{ x: number; y: number; rect: DeskRect; resize: boolean } | null>(null)
+  const beginPointer = (event: PointerEvent<HTMLElement>, resize = false) => { event.stopPropagation(); event.preventDefault(); onActivate(); dragStart.current = { x: event.clientX, y: event.clientY, rect, resize }; (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId) }
+  const movePointer = (event: PointerEvent<HTMLElement>) => { const start = dragStart.current; if (!start) return; const dx = event.clientX - start.x; const dy = event.clientY - start.y; if (start.resize) onRectChange({ w: Math.max(220, start.rect.w + dx), h: Math.max(150, start.rect.h + dy) }); else onRectChange({ x: Math.max(8, start.rect.x + dx), y: Math.max(55, start.rect.y + dy) }) }
+  const endPointer = () => { dragStart.current = null }
+  return <article className={`desk-window ${className} ${active ? 'active' : ''} ${mode === 'play' ? 'dimmed' : ''}`} style={{ left: rect.id === 'calendar' ? undefined : rect.x, top: rect.y, width: rect.w, height: rect.h, zIndex }} onClick={(e) => { e.stopPropagation(); onActivate() }} onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={endPointer}><div className="window-top" onPointerDown={(e) => beginPointer(e)}><div className="window-title"><span className="window-icon"><Icon size={16} /></span><span><small>{eyebrow}</small><strong>{title}</strong></span></div><button className="window-menu" aria-label={`${title} menu`}><MoreHorizontal size={17} /></button></div>{id === 'inbox' && <div className="window-body inbox-body"><div className="mail-row unread"><span className="mail-avatar blue">AM</span><span><strong>Alex Morgan</strong><small>Standup notes · 9:42 AM</small></span><span className="mail-dot" /></div><div className="mail-row"><span className="mail-avatar peach">JT</span><span><strong>Jamie Tan</strong><small>Re: launch checklist</small></span></div><div className="mail-row"><span className="mail-avatar lilac">NS</span><span><strong>Notion</strong><small>Your weekly digest</small></span></div><div className="window-link">Open inbox <span>↗</span></div></div>}{id === 'files' && <div className="window-body file-body"><div className="file-hero"><FileText size={18} /><span><strong>Budget · Q4 2025</strong><small>Updated 12 minutes ago</small></span><span className="file-chip">XLSX</span></div><div className="file-line" /><div className="file-small"><span>My Drive</span><span>24 items <ChevronDown size={13} /></span></div><div className="window-link">Open files <span>↗</span></div></div>}{id === 'calendar' && <div className="window-body calendar-body"><div className="calendar-event"><span className="event-time">10:30</span><span className="event-line" /><span><strong>Product sync</strong><small>Google Meet · 30 min</small></span></div><div className="calendar-event next"><span className="event-time">14:00</span><span className="event-line" /><span><strong>Focus time</strong><small>Deep work block</small></span></div><div className="window-link">Open calendar <span>↗</span></div></div>}<button className="window-resize" aria-label={`Resize ${title}`} onPointerDown={(e) => beginPointer(e, true)} onPointerMove={movePointer} onPointerUp={endPointer}>⌟</button></article>
 }
 
 function Onboarding({ onClose, onCreate }: { onClose: () => void; onCreate: (pet: PetBundle) => void }) {
@@ -198,6 +223,7 @@ function DrawPad() {
 }
 
 function ApprovalCard({ approval, onApprove, onCancel }: { approval: ApprovalState; onApprove: () => void; onCancel: () => void }) {
+  useEffect(() => { const onKey = (event: KeyboardEvent) => { if (event.key === 'Enter') onApprove(); if (event.key === 'Escape') onCancel() }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey) }, [onApprove, onCancel])
   return <div className="approval-layer"><section className="approval-card" role="dialog" aria-modal="true" aria-labelledby="approval-title"><div className="approval-kicker"><span className="approval-icon"><Send size={17} /></span><span>Human approval needed</span><button className="panel-close" onClick={onCancel} aria-label="Cancel approval"><X size={17} /></button></div><h2 id="approval-title">Send this for me?</h2><p className="approval-summary">{approval.preview.summary}</p><div className="approval-preview"><div><small>To</small><strong>{approval.preview.to?.join(', ')}</strong></div><div><small>Subject</small><strong>{approval.preview.subject}</strong></div><div><small>Message</small><p>{approval.preview.body}</p></div></div><div className="approval-actions"><button className="secondary-action" onClick={onCancel}>Cancel</button><button className="approve-action" onClick={onApprove}><span className="bone-mark">✦</span> Approve & send</button></div><small className="approval-footnote">Pip can only send the exact preview shown above.</small></section></div>
 }
 
@@ -210,7 +236,7 @@ function NotificationsPanel({ notifications, onClose }: { notifications: Notific
 }
 
 function SettingsPanel({ settings, onChange, onClose }: { settings: SettingsState; onChange: (patch: Partial<SettingsState>) => void; onClose: () => void }) {
-  return <div className="panel-layer"><aside className="side-panel settings-panel" role="dialog" aria-labelledby="settings-title"><PanelHeader icon={<Settings size={17} />} eyebrow="Personalise Fetch" title="Settings" onClose={onClose} /><div className="settings-group"><h3>Voice</h3><SettingToggle label="Voice replies" description="Let Pip speak short updates" checked={settings.voiceEnabled} onChange={(checked) => onChange({ voiceEnabled: checked })} /><label className="setting-row"><span><strong>Volume</strong><small>Pet speech and sound effects</small></span><input type="range" min="0" max="100" value={settings.volume} onChange={(event) => onChange({ volume: Number(event.target.value) })} /><b>{settings.volume}</b></label><div className="setting-row"><span><strong>Input mode</strong><small>How Fetch listens for commands</small></span><div className="segmented"><button className={settings.inputMode === 'ptt' ? 'selected' : ''} onClick={() => onChange({ inputMode: 'ptt' })}>Push to talk</button><button className={settings.inputMode === 'hands-free' ? 'selected' : ''} onClick={() => onChange({ inputMode: 'hands-free' })}>Hands-free</button></div></div></div><div className="settings-group"><h3>Desk & pet</h3><div className="setting-row"><span><strong>Visual quality</strong><small>Splats and animation detail</small></span><div className="segmented"><button className={settings.quality === 'high' ? 'selected' : ''} onClick={() => onChange({ quality: 'high' })}>High</button><button className={settings.quality === 'low' ? 'selected' : ''} onClick={() => onChange({ quality: 'low' })}>Low</button></div></div><SettingToggle label="Subtitles" description="Show captions for pet speech" checked={settings.subtitles} onChange={(checked) => onChange({ subtitles: checked })} /><SettingToggle label="Reduce motion" description="Use calmer Desk transitions" checked={settings.reduceMotion} onChange={(checked) => onChange({ reduceMotion: checked })} /><SettingToggle label="Sketchy shader" description="Give drawings a paper-grain edge" checked={settings.sketchyShader} onChange={(checked) => onChange({ sketchyShader: checked })} /></div><div className="settings-group danger-group"><h3>Data</h3><button className="delete-data"><Trash2 size={15} /> Delete my data <span>↗</span></button><small>Demo mode is on · no real accounts or messages are connected.</small></div></aside></div>
+  return <div className="panel-layer"><aside className="side-panel settings-panel" role="dialog" aria-labelledby="settings-title"><PanelHeader icon={<Settings size={17} />} eyebrow="Personalise Fetch" title="Settings" onClose={onClose} /><div className="settings-group"><h3>Voice</h3><SettingToggle label="Voice replies" description="Let Pip speak short updates" checked={settings.voiceEnabled} onChange={(checked) => onChange({ voiceEnabled: checked })} /><label className="setting-row"><span><strong>Volume</strong><small>Pet speech and sound effects</small></span><input type="range" min="0" max="100" value={settings.volume} onChange={(event) => onChange({ volume: Number(event.target.value) })} /><b>{settings.volume}</b></label><div className="setting-row"><span><strong>Input mode</strong><small>How Fetch listens for commands</small></span><div className="segmented"><button className={settings.inputMode === 'ptt' ? 'selected' : ''} onClick={() => onChange({ inputMode: 'ptt' })}>Push to talk</button><button className={settings.inputMode === 'hands-free' ? 'selected' : ''} onClick={() => onChange({ inputMode: 'hands-free' })}>Hands-free</button></div></div></div><div className="settings-group"><h3>Desk & pet</h3><div className="setting-row"><span><strong>Visual quality</strong><small>Splats and animation detail</small></span><div className="segmented"><button className={settings.quality === 'high' ? 'selected' : ''} onClick={() => onChange({ quality: 'high' })}>High</button><button className={settings.quality === 'low' ? 'selected' : ''} onClick={() => onChange({ quality: 'low' })}>Low</button></div></div><div className="setting-row"><span><strong>Theme</strong><small>Choose the Desk atmosphere</small></span><div className="segmented"><button className={settings.theme === 'light' ? 'selected' : ''} onClick={() => onChange({ theme: 'light' })}>Light</button><button className={settings.theme === 'dark' ? 'selected' : ''} onClick={() => onChange({ theme: 'dark' })}>Dark</button></div></div><SettingToggle label="Subtitles" description="Show captions for pet speech" checked={settings.subtitles} onChange={(checked) => onChange({ subtitles: checked })} /><SettingToggle label="Reduce motion" description="Use calmer Desk transitions" checked={settings.reduceMotion} onChange={(checked) => onChange({ reduceMotion: checked })} /><SettingToggle label="Sketchy shader" description="Give drawings a paper-grain edge" checked={settings.sketchyShader} onChange={(checked) => onChange({ sketchyShader: checked })} /></div><div className="settings-group danger-group"><h3>Data</h3><button className="delete-data"><Trash2 size={15} /> Delete my data <span>↗</span></button><small>Demo mode is on · no real accounts or messages are connected.</small></div></aside></div>
 }
 
 function SettingToggle({ label, description, checked, onChange }: { label: string; description: string; checked: boolean; onChange: (checked: boolean) => void }) {
