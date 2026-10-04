@@ -1,5 +1,5 @@
 {
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm build",
+  "buildCommand": "pnpm --filter @fetch/web build && pnpm --filter @fetch/desk build && node scripts/merge-web-dist.mjs",
   "outputDirectory": "apps/desk/dist"
 }

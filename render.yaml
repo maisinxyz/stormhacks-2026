@@ -1,0 +1,36 @@
+# Render Blueprint for the Fetch server (the Desk and Play sites are on Vercel, see vercel.json).
+# New > Blueprint > pick this repo. Secrets marked sync: false are asked for once in the dashboard; paste them from apps/server/.env.production.
+services:
+  - type: web
+    name: fetch-server
+    runtime: docker
+    dockerfilePath: ./infra/Dockerfile
+    dockerContext: .
+    plan: starter            # a disk needs a paid instance; the free plan has none and sleeps after 15 minutes
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: fetch-data
+      mountPath: /app/apps/server/data
+      sizeGB: 1
+    envVars:
+      - { key: NODE_ENV, value: development }   # shared demo mode: production forces Google sign-in
+      - { key: HOST, value: 0.0.0.0 }
+      - { key: DATA_DIR, value: /app/apps/server/data }
+      - { key: REQUIRE_LOGIN, value: "0" }
+      - { key: MOCK_GEN, value: "0" }
+      - { key: MOCK_VOICE, value: "0" }
+      - { key: MOCK_AGENT, value: "0" }
+      - { key: MOCK_CONNECTORS, value: "1" }    # the offline demo workspace: no real inboxes behind a shared demo user
+      - { key: MODEL_PROVIDER, value: gemini }
+      - { key: PUBLIC_URL, sync: false }         # the Vercel site, e.g. https://fetch-pets.vercel.app (asset links go through its rewrites)
+      - { key: WEB_ORIGIN, sync: false }
+      - { key: WEB_ORIGINS, sync: false }
+      - { key: SESSION_SECRET, sync: false }
+      - { key: ASSET_SIGNING_SECRET, sync: false }
+      - { key: TOKEN_ENC_KEY, sync: false }
+      - { key: GEMINI_API_KEY, sync: false }
+      - { key: ELEVENLABS_API_KEY, sync: false }
+      - { key: ELEVENLABS_MODEL_ID, value: eleven_flash_v2_5 }
+      - { key: REPLICATE_API_TOKEN, sync: false }
+      - { key: HF_TOKEN, sync: false }

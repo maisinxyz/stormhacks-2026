@@ -3,3 +3,7 @@ dist/
 *.tsbuildinfo
 .DS_Store
 .playwright-mcp/
+
+.vercel
+.env.local
+.env.production

@@ -18,8 +18,8 @@ WORKDIR /app/apps/server
 # Preserve pnpm's relative links and B1's workspace contract package.
 COPY --from=build /app /app
 RUN mkdir -p /app/apps/server/data && chown node:node /app/apps/server/data
-USER node
+# Hosts mount the data disk owned by root, so start as root, hand the disk to `node`, then drop to it for the server itself.
 ENV HOST=0.0.0.0 PORT=3001 DATA_DIR=/app/apps/server/data
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s CMD node -e "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "chown -R node:node \"$DATA_DIR\" && exec runuser -u node -- node dist/index.js"]
