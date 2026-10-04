@@ -61,6 +61,9 @@ export class Engine implements PetEngine {
   private view: 'desk' | 'room' | 'camera' = 'desk';
   private externalCamera = false;
   private groundPlane = 0;
+  private paws: { mesh: THREE.Mesh; bone: number; tip: THREE.Vector3 }[] = []; // small dark decal under each foot (contact cue)
+  private shadowOpacity = 1;
+  private shadowSize = new THREE.Vector2(1, 1); // body footprint (x width, z length) relative to the 1.2 m decal
   private petScale = 1;
   private overlay?: THREE.Scene;
   private claimedGestures = new Set<number>();
@@ -130,6 +133,17 @@ export class Engine implements PetEngine {
     this.needs = new Needs(b.stats, s => this.statsCb?.(s));
     this.beh = new Behavior(this.pack, this.host(), this.needs);
     this.beh.setMode(this.mode);
+    this.beh.setAutonomous(this.autonomous);
+    for (const p of this.paws) this.scene.remove(p.mesh);
+    this.paws = this.bones.flatMap((b, bone) => {
+      // the foot is the tip of the last bone in each leg chain (real pets have a lower-leg bone, placeholders do not)
+      if (!b.name.startsWith('leg') || this.bones.some(o => o.parent === bone) || !this.shadow) return [];
+      const mesh = new THREE.Mesh(this.shadow.geometry, (this.shadow.material as THREE.MeshBasicMaterial).clone());
+      mesh.renderOrder = -1;
+      this.scene.add(mesh);
+      return [{ mesh, bone, tip: new THREE.Vector3(...b.tail) }];
+    });
+    this.shadowSize.copy(this.splat.footprint()).multiplyScalar(1.25 / 1.2); // decal is a 1.2 m quad; a little larger than the body
     if (this.listeningPending) this.beh.setListening(true);
   }
 
@@ -137,10 +151,24 @@ export class Engine implements PetEngine {
     const o = this.beh!.update(dt), m = this.splat!.mesh;
     for (const b of this.bones) this.setBoneEuler(b.name, 0, 0, 0);
     for (const [n, e] of Object.entries(o.pose.bones)) this.setBoneEuler(n, e[0], e[1], e[2]);
-    m.position.set(o.x, o.y + this.groundPlane, o.z); // groundPlane = real floor height under WebXR
+    // behavior y (hops, carry lift) is in metres; the clip's own y offset is authored for a 1-unit pet, so scale it
+    const poseY = o.pose.y ?? 0;
+    m.position.set(o.x, o.y - poseY + poseY * this.petScale + this.groundPlane, o.z); // groundPlane = real floor height under WebXR
     m.rotation.y = o.yaw;
     m.scale.setScalar(this.petScale);
-    if (this.shadow) { this.shadow.position.set(o.x, this.groundPlane + 0.002, o.z); this.shadow.scale.setScalar(this.petScale); this.shadow.visible = m.visible; }
+    if (this.shadow) { this.shadow.position.set(o.x, this.groundPlane + 0.002, o.z); this.shadow.rotation.y = o.yaw; this.shadow.scale.set(this.shadowSize.x * this.petScale, 1, this.shadowSize.y * this.petScale); this.shadow.visible = m.visible; }
+    // contact darkening: follows each foot along the floor and fades as the foot lifts (walk cycle, hops, carry)
+    m.updateMatrix();
+    for (const p of this.paws) {
+      const w = this.boneWorld[p.bone];
+      if (!w) continue;
+      const v = p.tip.clone().applyMatrix4(w).applyMatrix4(m.matrix);
+      const lift = (v.y - this.groundPlane) / this.petScale;
+      p.mesh.position.set(v.x, this.groundPlane + 0.003, v.z);
+      p.mesh.scale.setScalar(0.3 * this.petScale);
+      (p.mesh.material as THREE.MeshBasicMaterial).opacity = this.shadowOpacity * THREE.MathUtils.clamp(1 - lift / 0.15, 0, 1);
+      p.mesh.visible = m.visible;
+    }
     this.applyLook(dt, o.pose.bones.head);
   }
 
@@ -168,7 +196,7 @@ export class Engine implements PetEngine {
   /** Splat colour multiplier (ambient match, play.md B.8). (1,1,1) = off. */
   setTint(r: number, g: number, b: number) { this.splat?.uniforms.uTint.value.set(r, g, b); this.tint.set(r, g, b); }
   private tint = new THREE.Vector3(1, 1, 1);
-  setShadowOpacity(o: number) { if (this.shadow) (this.shadow.material as THREE.MeshBasicMaterial).opacity = o; }
+  setShadowOpacity(o: number) { this.shadowOpacity = o; if (this.shadow) (this.shadow.material as THREE.MeshBasicMaterial).opacity = o; }
   /** Floor height of the ground plane the pet stands on (WebXR hit-test supplies the real floor). */
   setGroundHeight(y: number) { this.setGroundPlane(y); }
   /** Feed the species' own food (action chip / voice "treat"). */
@@ -186,6 +214,9 @@ export class Engine implements PetEngine {
 
   // ---- Camera-view seams (play.md B): the pet walks in world metres on the ground plane (Person A's model) ----
   setPetScale(s: number) { this.petScale = s; }
+  private autonomous = true;
+  /** false = the pet only moves on a command (camera view). */
+  setAutonomous(on: boolean) { this.autonomous = on; this.beh?.setAutonomous(on); }
   get scaleNow() { return this.petScale; }
   private walkTo?: { x: number; z: number };
   /** Put the pet at a ground point (metres). walk=true walks there with the walk/run cycle; false teleports. */
@@ -393,7 +424,7 @@ export class Engine implements PetEngine {
     const c = document.createElement('canvas');
     c.width = c.height = 64;
     const x = c.getContext('2d')!, g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
-    g.addColorStop(0, 'rgba(0,0,0,0.35)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    g.addColorStop(0, 'rgba(0,0,0,0.5)'); g.addColorStop(0.55, 'rgba(0,0,0,0.38)'); g.addColorStop(1, 'rgba(0,0,0,0)'); // dark core: reads as contact, not a haze
     x.fillStyle = g; x.fillRect(0, 0, 64, 64);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, depthTest: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));

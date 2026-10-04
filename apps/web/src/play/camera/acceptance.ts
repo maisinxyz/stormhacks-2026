@@ -145,9 +145,16 @@ export async function run(shell: PlayShell) {
     const held = e.beh.anim.clip === e.pack.clips[e.pack.intents.sit] && e.state === 'intent';
     e.doIntent('stop'); await sleep(300);
     const stood = e.state === 'idle';
+    // follow: turn 60 deg -> the dog walks back in front; "stay there" -> turn back and it does not move
+    cam.pose.recenter(); orient(55, 68); await sleep(600); cam.heard('follow me'); orient(115, 68); await sleep(600);
+    await until(() => e.travelling, 2000); await until(() => !e.travelling, 9000);
+    const followed = Math.abs(ndc().x) < 0.3;
+    cam.heard('stay there'); const pStay = pos(); orient(55, 68); await sleep(3000);
+    const pNow = pos(); const stayed = Math.hypot(pNow.x - pStay.x, pNow.z - pStay.z) < 0.01 && !cam.following; // xz only: sitting lowers the body
+    e.doIntent('stop'); cam.pose.recenter(); e.placePet(0, 0, false); await sleep(400);
     add('alive', 'B.13-6 never frozen; moves only on command; a pose holds until the next command',
-      seen.size > 40 && yawRange > 0.2 && moved < 0.01 && calm && held && stood,
-      `${seen.size}/60 distinct poses in 6 s idle, head yaw range ${yawRange.toFixed(2)} rad, moved ${moved.toFixed(3)} m after a jolt + 4.5 s out of frame (state ${calm ? 'idle' : 'not idle'}), sit held 6 s: ${held}, "stop" stands: ${stood} [synthetic sensor]`);
+      seen.size > 40 && yawRange > 0.2 && moved < 0.01 && calm && held && stood && followed && stayed,
+      `${seen.size}/60 distinct poses in 6 s idle, head yaw range ${yawRange.toFixed(2)} rad, moved ${moved.toFixed(3)} m after a jolt + 4.5 s out of frame (state ${calm ? 'idle' : 'not idle'}), sit held 6 s: ${held}, "stop" stands: ${stood}, "follow me" + 60 deg turn -> back in front: ${followed}, "stay there" + turn back -> did not move: ${stayed} [synthetic sensor]`);
 
     // B13-7: voice -> local intents
     cam.pose.recenter(); orient(55 + 110, 68); await sleep(300);

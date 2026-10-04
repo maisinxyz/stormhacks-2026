@@ -1,7 +1,11 @@
 // Camera view chrome (play.md B.2/B.7/B.10): edge controls only, the middle of the screen stays free.
+import type { LocalIntent } from '@fetch/contracts';
 
 export interface CameraUiHandlers {
   back(): void; flip(): void; recenter(): void; treat(): void; ball(): void;
+  /** A command chip: the same intents voice produces, for when speech recognition is unavailable. */
+  command(intent: LocalIntent): void;
+  follow(): void;
   micDown(): void; micUp(): void;
   /** Toggle true AR (WebXR). Only offered when the device supports it. */
   ar(): void;
@@ -36,10 +40,10 @@ export class CameraUi {
 
     // mic: hold to talk (pointer events so it works for touch and mouse; Space/Enter for keyboard)
     this.mic = btn(this.el, 'cam-btn bl', 'Hold to talk to your dog', '🎤');
-    const down = (e: Event) => { e.preventDefault(); this.mic.classList.add('on'); h.micDown(); };
+    const down = (e: Event) => { e.preventDefault(); if (e instanceof PointerEvent) this.mic.setPointerCapture(e.pointerId); this.mic.classList.add('on'); h.micDown(); }; // captured: sliding off the button does not cut the recording
     const up = () => { if (!this.mic.classList.contains('on')) return; this.mic.classList.remove('on'); h.micUp(); };
     this.mic.addEventListener('pointerdown', down);
-    this.mic.addEventListener('pointerup', up); this.mic.addEventListener('pointerleave', up); this.mic.addEventListener('pointercancel', up);
+    this.mic.addEventListener('pointerup', up); this.mic.addEventListener('pointercancel', up);
     this.mic.addEventListener('keydown', e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(e); });
     this.mic.addEventListener('keyup', e => { if (e.key === ' ' || e.key === 'Enter') up(); });
 
@@ -51,6 +55,9 @@ export class CameraUi {
     });
     more.setAttribute('aria-expanded', 'false');
     this.chips.className = 'cam-chips'; this.chips.dataset.ui = '1'; this.chips.hidden = true;
+    for (const [label, intent] of [['Sit', 'sit'], ['Stand', 'stop'], ['Stay', 'stay'], ['Come', 'come'], ['Spin', 'spin'], ['Roll over', 'roll_over']] as [string, LocalIntent][])
+      btn(this.chips, 'cam-chip', label, label, () => h.command(intent));
+    btn(this.chips, 'cam-chip', 'Follow me as I turn', 'Follow', h.follow);
     btn(this.chips, 'cam-chip', 'Give a treat', 'Treat', h.treat);
     btn(this.chips, 'cam-chip', 'Throw the ball', 'Ball', h.ball);
     btn(this.chips, 'cam-chip', 'Recenter the dog in front of you', 'Recenter', h.recenter);
@@ -62,7 +69,11 @@ export class CameraUi {
     this.flash.className = 'cam-flash';
     this.thumb.className = 'cam-thumb'; this.thumb.alt = 'Last photo'; this.thumb.hidden = true;
     this.coachEl.className = 'cam-coach'; this.coachEl.hidden = true;
-    this.coachEl.innerHTML = '<p>Move your phone. Your dog is here.</p><p class="tip">Tap the floor to place it <span aria-hidden="true">↓</span></p>';
+    this.coachEl.innerHTML = '<p>Move your phone. Your dog is here.</p><p class="tip">Tap the floor to place it <span aria-hidden="true">↓</span></p>'
+      + '<p class="tip">It stays put when you turn. It cannot hide behind things or follow you walking.</p>'; // honest limits of the gyro tier (B.14)
+    const grain = document.createElement('div'); // light film grain over feed + dog so the dog is not cleaner than the camera (B.8)
+    grain.className = 'cam-grain';
+    this.el.appendChild(grain);
     this.el.append(this.flash, this.thumb, this.coachEl);
 
     this.toastEl.className = 'cam-toast'; this.toastEl.setAttribute('role', 'status');

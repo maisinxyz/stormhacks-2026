@@ -46,7 +46,11 @@ export class CameraStream {
       }
       this.video.srcObject = this.stream;
     }
-    this.video.classList.toggle('mirrored', !this.mock && facing === 'user'); // selfie preview mirrors; the dog never does
+    // Selfie preview mirrors; the dog never does. Ask the track which way it faces: a laptop asked for the rear camera
+    // still opens its only (front) one, and reports no facingMode at all.
+    const real = this.stream?.getVideoTracks()[0]?.getSettings().facingMode;
+    const front = real ? real === 'user' : facing === 'user' || !matchMedia('(pointer: coarse)').matches;
+    this.video.classList.toggle('mirrored', !this.mock && front);
     await this.video.play().catch(() => { /* autoplay may need the gesture; first frame wait below still resolves or times out */ });
     await this.firstFrame();
   }

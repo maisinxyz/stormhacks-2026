@@ -440,15 +440,14 @@ Works on iOS and Android with no AR support.
 - **Cut this tier first** if behind schedule (see 0.13 cut order).
 
 ### B.6 "Alive" layer and behavior (`lookat.ts` + small `Behavior`/`Engine` seams)
-The dog must never freeze waiting for input.
+**Decided after device testing: in the camera view the dog only moves on a command.** It is still never frozen.
 
-- **Existing life kept:** breathing/idle clips, tail, idle routine, `react`, needs and mood (all from the engine).
-- **Look at the user:** after the animation pose is applied, override the head bone's yaw and pitch so the head turns toward the camera, clamped (about ±70° yaw, ±35° pitch), blended with a smoothing factor so it never snaps. Implemented as a post-pose hook on `Engine.tickBehavior` that writes to the skeleton's head bone. Eyes are not modelled in the splat, so there is **no blink** (documented limit); the head and ears and tail carry the life.
-- **Glance behavior:** the dog periodically looks at the camera for 1–3 s, then away at a random point (a gaze target on the ground plane), at irregular intervals.
-- **Reacting to phone movement:** a fast turn or a sudden jolt (angular speed above a threshold) makes the dog startle or look up (reuse `startle`/`perk`); steady movement keeps it relaxed.
-- **Out of frame:** if the dog has been out of the view frustum for about 3 s, it trots back toward the centre of the view and sits or greets (reuse `come`/`wag`).
-- **Greeting:** on entering the camera view the dog turns to face the user and does a short greeting clip, then settles into idle.
-- **Needs/mood keep working** (it can still yawn, nap, get hungry), but long routines are disabled that make it leave the screen (the exit/return errand animations are out of scope here).
+- **Stands in place:** with no command the dog plays the `stand` clip only (breathing, tail). No roaming, no furniture trips, no naps or yawns. `Engine.setAutonomous(false)` on enter, `true` on exit, so the Room keeps its own idle life.
+- **Look at the user:** after the animation pose is applied, the head bone's yaw and pitch are overridden so the head turns toward the camera, clamped and smoothed. Eyes are not modelled in the splat, so there is **no blink** (documented limit).
+- **Glance behavior:** the dog looks at the camera for 1–3 s, then away at a random point, at irregular intervals. Head only.
+- **Reacts without moving:** a tap or stroke gives the wag reaction; speaking holds its attention. It does not react to phone jolts and does not walk back when out of frame (both removed: they moved the dog with no command, and broke held poses).
+- **Poses hold:** `sit`, `stay`, `play_dead`, `hide` and `sleep` last until the next command. "Stand", "stop", "get up" or the Stand chip end them.
+- **Follow:** "follow" (voice or chip) makes the dog walk to stay in front of the user when they turn more than about 14°, at its current distance. Any other command, a floor tap or recenter ends it. "Stay there" ends it and holds the dog where it is.
 
 ### B.7 Interaction in the camera view
 | Input | Result |
@@ -457,34 +456,35 @@ The dog must never freeze waiting for input.
 | **Drag the dog** | The dog is carried: it follows the finger along the virtual floor (ground-plane raycast), then walks to the drop point and settles |
 | **Tap the floor** | `POINT`: the dog walks there |
 | **Pinch** | Scale the dog |
-| **Mic (push-to-talk)** | Voice → local intents (`sit`, `stay`, `come`, `speak`, `roll_over`, `spin`, `play_dead`, `shake`, `dance`, `hide`, `sleep`, `wake`, …) via the F2 pipeline → `engine.doIntent` |
-| **Action chips** (small, optional) | A couple of quick buttons: treat, ball (spawns the ball on the floor plane), recenter |
+| **Mic (hold to talk)** | Browser speech recognition → local intents (`sit`, `stay`, `come`, `speak`, `roll_over`, `spin`, `play_dead`, `shake`, `dance`, `hide`, `sleep`, `wake`, `stop`/"stand") plus "follow" → `engine.doIntent`. A failure shows the real reason (blocked mic, no speech service, nothing heard), never a generic message. Server-side transcription is the next step if the target browser has no speech service |
+| **Action chips** | Sit, Stand, Stay, Come, Spin, Roll over, Follow, Treat, Ball, Recenter. The command chips are the fallback when speech is unavailable; they do not count as voice working |
 | **Capture** | See B.9 |
 
 The existing `Interactions` window listeners keep working; Person B only needs the camera view's `toWorld` mapping to use the virtual ground plane (`setGroundPlane`) and the camera pose.
 
 ### B.8 Integration effects (making it feel in the world)
 - **Ambient tint (`tint.ts`):** every ~500 ms downsample the video frame to a tiny canvas and compute the average color. Feed it to a new `uTint` uniform in the splat fragment shader (multiplied into `vColor`, strength about 15–25%) so the dog picks up the room's color temperature. Keep it subtle and smoothed (low-pass over time).
-- **Contact shadow:** keep the blob shadow under the dog on the virtual ground, sized to the pet scale, with an opacity matched to the scene brightness (darker video → softer shadow).
-- **Grain/noise match (optional):** a light film-grain overlay on the engine canvas so the dog does not look cleaner than the camera feed (cut first if slow).
+- **Contact shadow:** a dark, body-shaped shadow (sized from the splat's own footprint, turning with the dog) plus a small dark decal under each foot that fades as the foot lifts. Opacity follows scene brightness but never drops below 60%. With no floor detection (decided: virtual floor plane, no calibration, no WebXR work) this is the only grounding cue.
+- **Grain/noise match:** a light static film-grain overlay over the feed and the dog (built; never in captures).
 - **Known limits (stated in the UI help and here):** no real occlusion (the dog draws over everything), no lighting from the real scene beyond the tint, and gyro anchoring cannot track walking through the room.
 
 ### B.9 Capture (`capture.ts`)
 - The capture button draws the current video frame, then the engine canvas, into one offscreen 2D canvas (match the video's aspect) and exports `image/jpeg` (or png). The renderer must be rendered in the same task immediately before `drawImage` (or the engine created with `preserveDrawingBuffer` only during capture), otherwise the canvas reads back blank.
 - Output: `navigator.share({ files })` when available (mobile), otherwise a download. A brief shutter flash and a small thumbnail confirm the capture. Captures never include UI chrome.
+- Default camera: rear on phones; a laptop only has a front camera, which is detected from the opened track and mirrored like a selfie. The laptop webcam is a development view (the floor is not in shot), the phone is the real experience.
 - Front camera: **decided: the photo is what-you-see.** The front-camera preview is mirrored, so the saved photo is mirrored too. Saving it un-mirrored would put the dog in a different place than it was on screen.
 - Video recording is a non-goal (a future `MediaRecorder` addition).
 
 ### B.10 Camera UI (`ui.ts`)
 Minimal, social-camera style:
 - **Top left:** back (to the Room). **Top right:** flip camera. Small and translucent.
-- **Bottom centre:** large capture button. **Bottom left:** mic (push-to-talk). **Bottom right:** a single "more" chip that expands the quick actions (treat, ball, recenter).
+- **Bottom centre:** large capture button. **Bottom left:** mic (hold to talk). **Bottom right:** a single "more" chip that expands the command and quick-action chips (see B.7).
 - Safe-area insets on all edges; the central 70% of the screen is free of UI.
 - **First-run coach mark:** "Move your phone — your dog is here" and an arrow to tap the floor to place it.
 - States: permission prompt (one line, large primary button), denied/unavailable (explain + return to Room), orientation permission denied (continue without anchoring, with a note that turning the phone will not move the dog), recoverable stream errors.
 
 ### B.11 Camera side of the transition
-- On `enter()` from Room: request camera and orientation permission inside the camera-button tap (iOS gesture rule), set `setView('camera', { petScale: 0.45 })`, `setExternalCamera(true)` with the gyro pose, `setSplatDepthTest(false)`, place the dog at the AR anchor facing the user, and hold the overlay until the first video frame arrives (the shell crossfades Room → Camera over about 0.5 s).
+- On `enter()` from Room: request camera and orientation permission inside the camera-button tap (iOS gesture rule), set `setView('camera', { petScale: 0.9 })`, `setExternalCamera(true)` with the gyro pose, `setSplatDepthTest(false)`, place the dog at the AR anchor facing the user, and hold the overlay until the first video frame arrives (the shell crossfades Room → Camera over about 0.5 s).
 - On `exit()` back to Room: stop tracks, remove listeners, restore nothing in the engine (the Room re-applies its own `setView`/camera), write the dog's final pose into `PetSession`.
 - If the camera cannot start, the shell cancels the transition and keeps the Room (no black screen).
 
@@ -500,44 +500,49 @@ Minimal, social-camera style:
 | 17–20 | Crossfade with the Room, device performance pass (low preset), accessibility, edge cases (background/resume, rotation). |
 | 20+ (stretch) | WebXR tier on Android; film grain; polish. Device testing and rehearsal. |
 
-**Build status (desktop, fake video feed + simulated motion; not yet run on a phone):**
+**Build status (desktop only; not yet run on a phone):**
 
 | Section | Status |
 |---|---|
-| B.2–B.4 camera stack, gyro anchoring, tap-to-place, pinch, recenter | Built, checked on desktop |
-| B.5 WebXR tier | Written, never run (needs an Android phone) |
-| B.6 alive layer | Built; phone-jolt reaction needs a real motion sensor to check |
-| B.7 interactions, voice | Built; voice uses browser speech recognition, real speech not exercised |
-| B.8 tint and shadow | Built; film grain not built |
+| B.2–B.4 camera stack, gyro anchoring, tap-to-place, pinch, recenter | Built, passes the desktop harness |
+| B.5 WebXR tier | Written, never run. Out of scope for now (target devices are iPhone and laptop) |
+| B.6 alive layer, command-only movement, held poses, follow / stay | Built, passes the desktop harness |
+| B.7 interactions, voice, command chips | Built; **real speech recognition has not worked for the user yet** (cause unknown, the toast now reports it) |
+| B.8 tint, body shadow, paw contact decals, grain | Built |
 | B.9 capture | Built; composite verified to contain the dog and no UI |
 | B.10 camera UI, coach mark, states | Built |
-| B.11 transition | Built in the shell (curtain crossfade, failed camera keeps the previous view); checked against a stand-in Room |
+| B.11 transition | Built in the shell (failed camera keeps the previous view) |
 
 ### B.13 Part B acceptance criteria
-- [ ] Pressing the camera button shows the rear camera full-screen and the dog on top of it within 1.5 s of permission being granted; there is no card, panel or modal around the camera.
-- [ ] On iOS Safari and Android Chrome the camera, orientation and microphone permission flows work from a single tap and recover from a denial.
-- [ ] Turning the phone slowly keeps the dog anchored in the scene (it slides across the screen opposite the turn) with no visible jitter; recenter fixes drift.
-- [ ] The dog sits on a believable floor plane: its feet meet the ground plane and its scale stays natural (about 0.45 m) as the phone tilts.
-- [ ] Tap-the-dog gives a look-at + wag reaction in under 300 ms; dragging moves the dog along the floor; tapping the floor walks it there; pinch rescales it.
-- [ ] The dog is never frozen: breathing, tail, head glances and idle behavior run continuously; it reacts to a fast phone movement and returns when out of frame.
-- [ ] Voice commands trigger the matching local intents; the dog's TTS/SFX never self-triggers the mic.
-- [ ] Capture saves or shares a photo of the camera frame plus the dog with no UI in it.
-- [ ] Switching Camera → Room → Camera repeatedly releases the camera light and leaks no listeners; the dog keeps its state.
-- [ ] 30+ fps in the camera view at the `low` preset on a mid-range phone.
-- [ ] If WebXR ships: on a supported Android phone, walking around the dog works, and failing or ending the session falls back to the pseudo-AR path without a reload.
+Measured by `/camera.html?pet=dog&accept=camera` (`src/play/camera/acceptance.ts`): a fake canvas camera, synthetic device-orientation events, the placeholder dog, on a desktop with an Intel Arc GPU. `[x]` = passes there. `[ ]` = cannot be shown on a desktop; needs a phone.
+
+- [x] Pressing the camera button shows the camera full-screen and the dog on top of it within 1.5 s; no card, panel or modal. *450 ms from tap to live.*
+- [ ] On iOS Safari and Android Chrome the camera, orientation and microphone permission flows work from a single tap and recover from a denial. *Simulated denial keeps the Room and retry works; real prompts not exercised.*
+- [x] Turning the phone slowly keeps the dog anchored with no visible jitter; recenter fixes drift. *0.01 m world movement over a 15° turn, jitter sd 0.0012 ndc, recenter to 0.00. Synthetic sensor.*
+- [x] The dog sits on the floor plane and its scale stays natural as the phone tilts. *0.000 m height error over stand/sit/lie at 4 tilts, scale 0.9 m throughout (was 0.45 m; doubled after testing).*
+- [x] Tap-the-dog gives a look-at + wag in under 300 ms; drag moves it along the floor; a floor tap walks it there; pinch rescales it. *35 ms; drag 0.00 m; floor tap 0.06 m; pinch 0.9 → 1.8.*
+- [x] The dog is never frozen, moves only on a command, and a pose holds until the next command (**changed** from "reacts to a fast phone movement and returns when out of frame"). *60/60 distinct poses in 6 s; 0.000 m moved after a jolt and 4.5 s out of frame; sit held 6 s; "follow me" + 60° turn brings it back in front; "stay there" keeps it put.*
+- [ ] Voice commands trigger the matching local intents. *15/15 phrases map correctly and "please sit" plays the sit clip, but through the parser only. With a real microphone the user got an error; unresolved until the phone test.*
+- [x] Capture produces the camera frame plus the dog with no UI in it. *0 px differ under the controls. Share sheet / download not exercised.*
+- [x] Switching Camera ↔ Room five times releases the camera and leaks nothing; the dog keeps its state. *0 live tracks in the Room, 0 leaked layers or handlers.*
+- [ ] 30+ fps in the camera view at the `low` preset on a mid-range phone. *60 fps on the desktop with the 10.8k-splat placeholder; not a phone measurement.*
+- [ ] WebXR: not run, and out of scope for the current target devices.
+
+**Success test agreed with the owner (must be shown on a phone):** I say "sit" and the dog sits and stays sat; it stands on the floor and does not move unless I tell it to; I take a photo and the dog looks natural in it.
 
 ### B.14 Part B risks and mitigations
 
-| Risk | Mitigation |
-|---|---|
-| iOS has no browser AR (no plane detection, no occlusion, no translation tracking) | Set expectations in the PRD and UI copy; design the universal tier to be convincing with gyro anchoring + shadow + tint; WebXR only as an Android upgrade |
-| Gyro yaw drift makes the dog "slide" over time | Low-pass filtering, easy recenter, optional auto-recenter when the user taps to place |
-| Permissions (HTTPS, iOS gesture-gated orientation, camera denied) | LAN HTTPS dev server, request in the button tap, explicit error states, a way back to the Room |
-| Phone GPU/thermal limits with a 300k splat dog plus a live video | Default `low` preset (120k), render scale 1.0–1.25, existing fps rescue; measure on real hardware early |
-| Capture reads a blank canvas (WebGL drawing buffer is cleared after compositing) | Render and `drawImage` in the same task, or toggle `preserveDrawingBuffer` only during capture; add a Playwright test |
-| Dog does not look like it belongs in the scene | Ambient tint, contact shadow, optional grain, correct scale; set honest expectations about occlusion |
-| Splat shader needs per-view projection in XR | Isolate the change in `SplatMesh.update` with a unit-of-work test that the non-XR path is unchanged; stretch tier so it can be cut |
-| Phone screen rotation/orientation edge cases | Prefer portrait lock, handle `orientationchange`, test both |
+| Risk | Mitigation | Status |
+|---|---|---|
+| iOS has no browser AR (no plane detection, no occlusion, no translation tracking) | Gyro anchoring + shadow + tint; honest limits in the coach mark | Built. Occlusion is a stated limit, not planned |
+| Gyro yaw drift makes the dog "slide" over time | Low-pass filtering, easy recenter | Built. Auto-recenter on tap-to-place not built |
+| Permissions (HTTPS, iOS gesture-gated orientation, camera denied) | `pnpm dev:phone` (LAN HTTPS), prompts requested inside the tap, explicit error states, a way back to the Room | Built; untested on a real phone |
+| Speech recognition is missing or fails in the target browser | The toast reports the real error code; command chips as a fallback; server-side transcription if the phone test fails | Chips and reporting built; transcription not built |
+| Phone GPU/thermal limits with a live video | Default `low` preset (120k), render scale 1.0–1.25, existing fps rescue | Built; not measured on a phone |
+| Capture reads a blank canvas | Render and `drawImage` in the same task; harness check | Built and checked |
+| Dog does not look like it belongs in the scene | Tint, body-shaped shadow, paw contact decals, grain, 0.9 m scale | Built. The floor is an assumed plane 1.4 m below the phone, so on a webcam that does not see the floor the dog still stands in mid-air |
+| Splat shader needs per-view projection in XR | Isolated in `SplatMesh.update`; non-XR focal length checked unchanged | Built; XR itself never run |
+| Phone screen rotation | Portrait lock attempted (browsers usually refuse outside fullscreen); the pose reads the live screen angle | Built; landscape untested on a phone |
 
 ---
 

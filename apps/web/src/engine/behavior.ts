@@ -50,6 +50,8 @@ export class Behavior {
   private cursor?: { x: number; y: number; t: number };
   private animId = 0;
   private spot?: { id: FurnitureSpot['id']; until: number };
+  /** false = command-only (camera view): never walks or changes pose by itself, and held poses last until the next command. */
+  private autonomous = true;
 
   constructor(private pack: SpeciesPack, private host: BehaviorHost, private needs: Needs) {
     this.start(this.idle(), 'idle');
@@ -57,6 +59,7 @@ export class Behavior {
 
   // ---------- public inputs ----------
   setMode(m: Mode) { this.mode = m; if (this.state === 'idle' || this.state === 'play') this.start(this.idle(), m === 'play' ? 'play' : 'idle'); }
+  setAutonomous(on: boolean) { this.autonomous = on; if (this.state === 'idle' || this.state === 'play') this.start(this.idle(), this.state); }
   setListening(on: boolean) {
     this.listening = on;
     if (on && (this.state === 'idle' || this.state === 'play')) this.start(this.listen(), 'listening');
@@ -197,6 +200,7 @@ export class Behavior {
     while (true) {
       this.mood = this.base();
       if (this.listening) { yield* this.listen(); }
+      if (!this.autonomous) { yield* this.play('stand', rand(3, 6)); continue; } // breathing + tail only, stays put
       // zero energy auto-naps, only here (idle) so errands are never affected
       if (this.needs.stats.energy <= 0) { yield* this.sleepRoutine(true); continue; }
       if (this.needs.stats.energy < 25 && Math.random() < 0.4) { yield* this.play('yawn', undefined); continue; }
@@ -254,6 +258,7 @@ export class Behavior {
   private *intent(name: string, id: string, hold: boolean): Routine {
     this.playClip(name);
     const c = this.pack.clips[name];
+    if (hold && !this.autonomous) { yield () => false; return; } // sit/stay: held until the next command starts a routine
     yield* this.wait(hold ? 3 : c.dur * (c.loop ? 2 : 1));
     this.host.emit({ type: 'ANIM_DONE', id });
   }

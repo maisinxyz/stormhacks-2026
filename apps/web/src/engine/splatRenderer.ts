@@ -101,6 +101,15 @@ export class SplatMesh {
   private lastDir = new THREE.Vector3(9, 9, 9);
 
   // splat: .splat bytes (32B/splat: pos3f scale3f rgba4u8 rot4u8); weights: 8B/splat (4 idx + 4 weight)
+  /** Rest-pose body footprint on the floor (x width, z length), ignoring the outermost 2% of splats. */
+  footprint() {
+    const c = this.centers, n = c.length / 3, xs = new Float32Array(n), zs = new Float32Array(n);
+    for (let i = 0; i < n; i++) { xs[i] = c[i * 3]; zs[i] = c[i * 3 + 2]; }
+    xs.sort(); zs.sort();
+    const lo = Math.floor(n * 0.02), hi = Math.max(lo, Math.ceil(n * 0.98) - 1);
+    return new THREE.Vector2(xs[hi] - xs[lo], zs[hi] - zs[lo]);
+  }
+
   constructor(splat: ArrayBuffer, weights: ArrayBuffer) {
     const n = (this.count = this.total = splat.byteLength / 32);
     const f = new Float32Array(splat), u = new Uint8Array(splat), w = new Uint8Array(weights);

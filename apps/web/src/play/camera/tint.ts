@@ -32,7 +32,7 @@ export class AmbientTint {
       const lum = (this.lum = 0.2126 * r + 0.7152 * g + 0.0722 * b), mean = (r + g + b) / 3 || 1;
       const bright = 1 + (clamp(lum / 0.45, 0.55, 1.15) - 1) * 0.5; // dim room -> slightly darker dog
       this.target = [r, g, b].map(v => (1 + (v / mean - 1) * STRENGTH) * bright);
-      this.shadow = clamp(0.35 + lum * 0.9, 0.35, 1);               // darker video -> softer shadow
+      this.shadow = clamp(0.6 + lum * 0.7, 0.6, 1);               // darker video -> softer shadow
     } catch { this.dead = true; } // cross-origin video taints the canvas: leave the dog untinted
   }
 

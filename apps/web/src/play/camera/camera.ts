@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { parseCommand, PushToTalk } from '../voice';
 import type { OrientationStatus } from './pose';
+import type { LocalIntent } from '@fetch/contracts';
 import type { PlayContext, PlayView, PlayViewId } from '../types';
 import { Alive } from './lookat';
 import './camera.css';
@@ -13,10 +14,18 @@ import { AmbientTint } from './tint';
 import { CameraUi } from './ui';
 import { XrTier, xrSupported } from './xr';
 
-export const AR_PET_SCALE = 0.45;            // metres tall: a believable pet next to someone holding a phone
+export const AR_PET_SCALE = 0.9;             // metres tall: large-dog size, so it fills about a third of a phone screen at 2 m
 const SCALE_MIN = 0.25, SCALE_MAX = 2;       // pinch range (multiplier on AR_PET_SCALE)
 const PLACE_MIN = 0.8, PLACE_MAX = 5;        // tap-to-place distance from the user (m)
 const TAP_PX = 8, TAP_MS = 350, HOLD_MS = 600;
+// Web Speech error codes -> what the user can do about it (anything else shows the raw code)
+const VOICE_ERRORS: Record<string, string> = {
+  'not-allowed': 'Microphone access is blocked. Allow it in the browser, or use the command buttons under ⋯.',
+  'service-not-allowed': 'This browser blocks speech recognition. Use the command buttons under ⋯.',
+  'audio-capture': 'No microphone found. Use the command buttons under ⋯.',
+  network: 'Speech recognition could not reach its service (needs Chrome or Safari, online). Use the command buttons under ⋯.',
+  'no-speech': 'Did not hear anything. Hold the mic, speak, then release.',
+};
 const CARRY_PX = 48;                         // a press on the dog that travels this far is a carry, not a stroke
 
 export class CameraView implements PlayView {
@@ -30,6 +39,10 @@ export class CameraView implements PlayView {
   private xr!: XrTier;
   private voice!: PushToTalk;
   private live = false;
+  /** Pinch multiplier on AR_PET_SCALE. (session.scale is the Room's pet size in the shared shell, not ours.) */
+  private zoom = 1;
+  /** "Follow": the dog walks to stay in front of the user as they turn. Any other command ends it. */
+  private following = false;
   private entered = false;
   private frame?: XRFrame;
   // gesture state: pointers that did NOT start on the pet or on UI
@@ -57,16 +70,18 @@ export class CameraView implements PlayView {
     const e = ctx.engine;
     if (!this.ui) {
       this.pose = new PhonePose(e.camera);
-      this.alive = new Alive(e, this.pose, () => this.inViewGround());
+      this.alive = new Alive(e);
       this.tint = new AmbientTint(this.stream.video, e);
       this.xr = new XrTier(e, ctx.root, () => this.xrEnded());
-      this.voice = new PushToTalk(t => this.heard(t), code => this.ui.toast(code === 'not-allowed' ? 'Microphone access is blocked.' : 'Did not catch that.'));
+      this.voice = new PushToTalk(t => this.heard(t), code => this.ui.toast(VOICE_ERRORS[code] ?? `Voice error (${code}). Use the command buttons under ⋯.`, 6000));
       this.ui = new CameraUi({
         back: () => ctx.switchTo('room'),
         flip: () => void this.stream.flip().catch(err => this.fail(err)),
         recenter: () => this.recenter(),
         treat: () => { if (e.feed()) this.alive.focus(2); },
         ball: () => e.doIntent('fetch_ball'),
+        command: i => { this.following = false; this.alive.focus(2.5); e.doIntent(i); },
+        follow: () => this.follow(),
         micDown: () => { e.setListening(true); this.alive.focus(6); this.voice.start(); },
         micUp: () => { e.setListening(false); this.voice.stop(); },
         ar: () => void this.toggleXr(),
@@ -86,13 +101,17 @@ export class CameraView implements PlayView {
     this.entered = true;
     ctx.root.insertBefore(this.stream.video, ctx.canvas); // video under the transparent engine canvas
     ctx.root.appendChild(this.ui.el);
-    e.setView('camera', { petScale: AR_PET_SCALE * ctx.session.scale });
+    e.setView('camera', { petScale: AR_PET_SCALE * this.zoom });
     e.setExternalCamera(true);       // this view owns the 3D camera (gyro pose)
     e.setOverlayScene(null);         // no room geometry
     e.setFurnitureSpots([]);
+    e.setAutonomous(false);          // the dog only moves on a command here (voice, chips, tap, drag)
     e.setSplatDepthTest(false);      // no real depth in AR: the dog always draws over the video
     e.setGroundPlane(0);
     e.placePet(0, 0, false);         // the dog starts at the anchor, about 2 m in front of the user
+    // Prefer portrait. Browsers only allow the lock in fullscreen / installed apps, so a refusal is expected and fine:
+    // PhonePose reads the live screen angle on every sensor event, so landscape still tracks correctly.
+    void (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> } | undefined)?.lock?.('portrait').catch(() => { /* not allowed here */ });
     this.pose.update(0);
     window.addEventListener('pointerdown', this.onDown);
     window.addEventListener('pointermove', this.onMove);
@@ -165,15 +184,17 @@ export class CameraView implements PlayView {
     clearTimeout(this.holdTimer);
     this.pts.clear(); this.pinch = undefined; this.petPtr = undefined;
     if (this.xr.active) this.xr.stop();
+    try { screen.orientation?.unlock?.(); } catch { /* was never locked */ }
     this.voice.abort();
     this.ctx.engine.setListening(false);
+    this.ctx.engine.setAutonomous(true); // the Room keeps its own idle life
     this.stream.stop();               // camera light off
     this.pose.stop();
     this.alive.exit();
     this.tint.reset();
     this.stream.video.remove();
     this.ui.el.remove();
-    this.live = this.entered = false;
+    this.live = this.entered = this.following = false;
     this.pending = undefined;
   }
 
@@ -182,12 +203,14 @@ export class CameraView implements PlayView {
     if (this.xr.active) this.xr.update(frame); // the XR session owns the camera pose
     else this.pose.update(dt);
     if (!this.live) return;
-    this.alive.update(dt, !this.xr.active && !this.pose.simulated);
+    this.alive.update(dt);
+    if (this.following) this.followStep();
     if (!this.xr.active) this.tint.update(dt);
   }
   resize() { /* engine resizes its canvas; video is CSS object-fit: cover */ }
 
   private recenter() {
+    this.following = false;
     if (this.xr.active) { const g = this.inViewGround(); if (g) this.ctx.engine.placePet(g.x, g.z, false); }
     else { this.pose.recenter(); this.ctx.engine.placePet(0, 0, false); } // dog back in front of the user
     this.alive.focus(2);
@@ -197,12 +220,14 @@ export class CameraView implements PlayView {
   // ---------- voice (B.7): push-to-talk -> local intents ----------
   private heard(text: string) {
     const c = parseCommand(text), e = this.ctx.engine;
-    if (!c) { this.ui.toast(`"${text}" - try sit, spin, dance, roll over...`); return; }
+    if (!c) { this.ui.toast(`Heard "${text}". Try sit, stand, spin, dance, roll over...`, 5000); return; }
     this.alive.focus(2.5);
-    if (c.kind === 'intent') e.doIntent(c.intent);
+    this.following = false;
+    if (c.kind === 'follow') this.follow();
+    else if (c.kind === 'intent') e.doIntent(c.intent);
     else if (c.kind === 'praise') e.react('tap');
     else e.feed();
-    this.ui.toast(`"${text}"`, 1800); // caption of what was heard
+    this.ui.toast(`Heard "${text}"`, 2500); // caption of what was heard
   }
 
   // ---------- WebXR tier (B.5) ----------
@@ -241,7 +266,7 @@ export class CameraView implements PlayView {
     clearTimeout(this.holdTimer);
     if (this.pts.size === 2) {
       const [a, b] = [...this.pts.values()];
-      this.pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, scale: this.ctx.session.scale };
+      this.pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, scale: this.zoom };
       this.wasPinch = true;
     } else if (this.pts.size === 1) {
       this.wasPinch = false;
@@ -266,7 +291,7 @@ export class CameraView implements PlayView {
     if (this.pinch && this.pts.size === 2) {
       const [a, b] = [...this.pts.values()];
       const s = THREE.MathUtils.clamp(this.pinch.scale * (Math.hypot(a.x - b.x, a.y - b.y) / this.pinch.dist), SCALE_MIN, SCALE_MAX);
-      this.ctx.session.scale = s;
+      this.zoom = s;
       this.ctx.engine.setPetScale(AR_PET_SCALE * s);
     } else if (this.pts.size === 1 && p.path > TAP_PX && this.pose.simulated && !this.xr.active) {
       this.pose.look(dx, dy); // no gyro: drag stands in for turning the phone
@@ -303,8 +328,23 @@ export class CameraView implements PlayView {
   /** Tap or drag on the floor: the dog walks to that spot. */
   private place(px: number, py: number) {
     if (!this.live) return;
+    this.following = false;
     const g = this.groundAt(px, py);
     if (g) this.ctx.engine.placePet(g.x, g.z, true);
+  }
+
+  private follow() { this.following = true; this.alive.focus(2.5); this.ui.toast('Following you. Say "stay" to stop.', 2500); }
+
+  /** While following: when the user has turned more than ~14 deg away, walk to the same distance straight ahead of them. */
+  private followStep() {
+    const e = this.ctx.engine, cam = e.camera;
+    if (e.travelling) return;
+    const p = e.petPosition, dx = p.x - cam.position.x, dz = p.z - cam.position.z;
+    const f = cam.getWorldDirection(new THREE.Vector3());
+    const fl = Math.hypot(f.x, f.z), dist = THREE.MathUtils.clamp(Math.hypot(dx, dz), PLACE_MIN, PLACE_MAX);
+    if (fl < 0.2) return; // looking straight up or down: no heading
+    const cos = (dx * f.x + dz * f.z) / (fl * (Math.hypot(dx, dz) || 1));
+    if (cos < 0.97) e.placePet(cam.position.x + f.x / fl * dist, cam.position.z + f.z / fl * dist, true);
   }
 
   /** A floor point comfortably inside the current view (lower-middle of the screen). */

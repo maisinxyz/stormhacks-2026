@@ -3,7 +3,7 @@
 // shares a build with apps/desk.
 import type { LocalIntent } from '@fetch/contracts';
 
-export type VoiceCommand = { kind: 'intent'; intent: LocalIntent } | { kind: 'praise' } | { kind: 'feed' };
+export type VoiceCommand = { kind: 'intent'; intent: LocalIntent } | { kind: 'praise' } | { kind: 'feed' } | { kind: 'follow' };
 
 const TABLE: [RegExp, VoiceCommand][] = [
   [/\broll over\b/, { kind: 'intent', intent: 'roll_over' }],
@@ -11,6 +11,7 @@ const TABLE: [RegExp, VoiceCommand][] = [
   [/\b(fetch|get the ball|ball)\b/, { kind: 'intent', intent: 'fetch_ball' }],
   [/\bgood (boy|girl|pet|dog|bird)\b/, { kind: 'praise' }],
   [/\b(treat|feed|dinner|food)\b/, { kind: 'feed' }],
+  [/\bfollow\b/, { kind: 'follow' }], // camera view: keep in front of the user as they turn
   [/\bwake( up)?\b/, { kind: 'intent', intent: 'wake' }],
   [/\b(sleep|nap|bed ?time)\b/, { kind: 'intent', intent: 'sleep' }],
   [/\bsit\b/, { kind: 'intent', intent: 'sit' }],
@@ -22,7 +23,7 @@ const TABLE: [RegExp, VoiceCommand][] = [
   [/\bdance\b/, { kind: 'intent', intent: 'dance' }],
   [/\bhide\b/, { kind: 'intent', intent: 'hide' }],
   [/\btrick\b/, { kind: 'intent', intent: 'trick' }],
-  [/\bstop\b/, { kind: 'intent', intent: 'stop' }],
+  [/\b(stop|stand|get up|up)\b/, { kind: 'intent', intent: 'stop' }], // 'stop' is the stand-in-place intent
 ];
 
 export function parseCommand(text: string): VoiceCommand | null {
@@ -51,7 +52,7 @@ export class PushToTalk {
     const r = (this.rec = new Ctor());
     r.lang = 'en-US'; r.interimResults = false; r.continuous = false;
     r.onresult = e => { this.heard = Array.from(e.results).map(x => x[0].transcript).join(' '); };
-    r.onerror = e => { if (e.error !== 'aborted' && e.error !== 'no-speech') this.onError(e.error); };
+    r.onerror = e => { if (e.error !== 'aborted') this.onError(e.error); };
     r.onend = () => { if (this.heard) this.onText(this.heard); this.heard = ''; };
   }
 
