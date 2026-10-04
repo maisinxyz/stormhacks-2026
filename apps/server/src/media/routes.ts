@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { createGzip, createBrotliCompress } from 'node:zlib';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ApiError } from '../errors.js';
 import type { ServerContext } from '../app.js';
@@ -87,18 +87,20 @@ export async function registerMediaRoutes(app: FastifyInstance, ctx: ServerConte
     scoped.post('/uploads', async req => {
       const { files } = await multipart(req, ['image']); return media.upload(user(req), required(files, 'image'));
     });
+    // The shared error handler only sends {code,message}; free-tier quota also tells the UI when to retry.
+    const quota = (e: unknown, reply: FastifyReply) => {
+      if (!(e instanceof QuotaError) || !e.retryAfter) throw e;
+      return reply.code(429).header('Retry-After', e.retryAfter).send({ code: e.code, message: e.message, retryAfter: e.retryAfter });
+    };
     scoped.post('/gen/segment', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
       const { files } = await multipart(req, ['image']);
       let png: Buffer;
-      try { png = await media.segment(required(files, 'image')); } catch (e) {
-        // The shared error handler only sends {code,message}; free-tier quota also tells the UI when to retry.
-        if (!(e instanceof QuotaError) || !e.retryAfter) throw e;
-        return reply.code(429).header('Retry-After', e.retryAfter).send({ code: e.code, message: e.message, retryAfter: e.retryAfter });
-      }
+      try { png = await media.segment(required(files, 'image')); } catch (e) { return quota(e, reply); }
       return reply.type('image/png').send(png);
     });
-    scoped.post('/gen/reference', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async req => {
-      const b = z.object({ imageId: imageIdSchema, species: speciesSchema }).strict().parse(req.body); return media.reference(user(req), b.imageId, b.species);
+    scoped.post('/gen/reference', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+      const b = z.object({ imageId: imageIdSchema, species: speciesSchema, kind: z.enum(['drawing', 'photo']).default('drawing') }).strict().parse(req.body);
+      try { return await media.reference(user(req), b.imageId, b.species, b.kind); } catch (e) { return quota(e, reply); }
     });
     scoped.post('/gen/image-to-3d', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async req => {
       const b = z.object({ imageIds: z.array(imageIdSchema).refine(v => v.length === 1 || v.length === 3, 'Provide one or three images'), species: speciesSchema }).strict().parse(req.body);

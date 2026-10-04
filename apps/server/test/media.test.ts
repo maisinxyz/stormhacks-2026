@@ -303,12 +303,12 @@ function trellisPly(n = 2000) {
   return Buffer.concat([header, data]);
 }
 /** Fake @gradio/client: each endpoint handler returns the prediction's data array. */
-function fakeGradio(handlers: Record<string, (data: any) => unknown[] | Promise<unknown[]>> = {}) {
+function fakeGradio(handlers: Record<string, (data: any) => unknown[] | Promise<unknown[]>> = {}, expectedSpace = 'trellis-community/TRELLIS') {
   const calls: { endpoint: string; data: any }[] = []; let connects = 0;
   const gradio: Gradio = {
     handle_file: blob => ({ blob }),
     Client: { connect: async space => {
-      assert.equal(space, 'trellis-community/TRELLIS'); connects++;
+      assert.equal(space, expectedSpace); connects++;
       return { predict: async (endpoint, data) => { calls.push({ endpoint, data }); return { data: await (handlers[endpoint] ?? (() => []))(data) }; }, close() {} };
     } }
   };
@@ -411,4 +411,55 @@ test('segment uses the free Space background removal without FAL_KEY and only do
   for (const url of ['https://trellis-community-trellis.hf.space.evil.example/x.ply', 'https://replicate.delivery/x.ply', 'http://trellis-community-trellis.hf.space/x.ply']) {
     await assert.rejects(providers.download(url, 1024, spaceHost(f.config.HF_TRELLIS_SPACE)), /asset host/);
   }
+});
+
+const EDIT_SPACE = 'black-forest-labs/FLUX.1-Kontext-Dev';
+const EDIT_FILES = 'https://black-forest-labs-flux-1-kontext-dev.hf.space/gradio_api/file=/tmp/gradio/';
+async function editFixture(t: import('node:test').TestContext, infer: (data: any) => unknown[] | Promise<unknown[]>) {
+  const edited = await sharp({ create: { width: 40, height: 30, channels: 3, background: '#8b5a2b' } }).webp().toBuffer();
+  const fetched: string[] = [];
+  const f = await fixture(t, { MOCK_GEN: '0' }, async input => {
+    const url = String(input); fetched.push(url);
+    if (url === `${EDIT_FILES}out.webp`) return new Response(new Uint8Array(edited));
+    throw new Error(`Unexpected URL ${url}`);
+  });
+  const fake = fakeGradio({ '/infer': infer }, EDIT_SPACE);
+  f.context.media.providers.gradio = fake.gradio;
+  const imageId = (await f.form('/uploads', { image: f.png })).json().imageId;
+  return { ...f, fake, fetched, imageId };
+}
+
+test('reference uses the free Kontext Space without FAL_KEY: drawing and photo prompts, stored as a new PNG', async t => {
+  const f = await editFixture(t, () => [{ url: `${EDIT_FILES}out.webp`, path: '/tmp/gradio/out.webp' }, 0]);
+  assert.equal(readConfig({}).HF_EDIT_SPACE, EDIT_SPACE);
+  const drawing = await f.app.inject({ method: 'POST', url: '/gen/reference', payload: { imageId: f.imageId, species: 'dog' } });
+  assert.equal(drawing.statusCode, 200, drawing.body); assert.notEqual(drawing.json().imageId, f.imageId);
+  const stored = await f.context.storage.read(drawing.json().imageId, 'alice');
+  const meta = await sharp(stored).metadata(); assert.equal(meta.format, 'png'); assert.deepEqual([meta.width, meta.height], [40, 30]);
+  const photo = await f.app.inject({ method: 'POST', url: '/gen/reference', payload: { imageId: f.imageId, species: 'cat', kind: 'photo' } });
+  assert.equal(photo.statusCode, 200, photo.body);
+  assert.deepEqual(f.fake.calls.map(c => c.endpoint), ['/infer', '/infer']);
+  const [d, p] = f.fake.calls.map(c => c.data);
+  assert.ok(d.input_image.blob instanceof Blob); assert.equal(d.randomize_seed, false);
+  assert.match(d.prompt, /^Transform this drawing into a photorealistic photo of a real dog\./); assert.match(d.prompt, /standing on all four legs, full body side view/i);
+  assert.match(p.prompt, /^The same cat from this photo, standing on all four legs/); assert.match(p.prompt, /eye color/);
+  assert.equal((await f.app.inject({ method: 'POST', url: '/gen/reference', payload: { imageId: f.imageId, species: 'cat', kind: 'sketch' } })).statusCode, 422);
+  assert.equal(f.fake.calls.length, 2);
+});
+
+test('free reference maps ZeroGPU quota to 429 gen_quota with retryAfter and then fails fast', async t => {
+  const f = await editFixture(t, () => { throw { type: 'status', stage: 'error', message: QUOTA }; });
+  const payload = { imageId: f.imageId, species: 'dog' };
+  const r = await f.app.inject({ method: 'POST', url: '/gen/reference', payload });
+  assert.equal(r.statusCode, 429, r.body); assert.equal(r.json().code, 'gen_quota');
+  assert.ok(r.json().retryAfter > 23 * 3600 && r.json().retryAfter <= 23 * 3600 + 53 * 60 + 46, r.body); assert.ok(Number(r.headers['retry-after']) > 0);
+  assert.equal((await f.app.inject({ method: 'POST', url: '/gen/reference', payload })).statusCode, 429);
+  assert.equal(f.fake.calls.length, 1);
+});
+
+test('free reference only downloads the edit from the edit Space host', async t => {
+  const f = await editFixture(t, () => [{ url: 'https://trellis-community-trellis.hf.space/gradio_api/file=/tmp/gradio/out.webp' }, 0]);
+  const r = await f.app.inject({ method: 'POST', url: '/gen/reference', payload: { imageId: f.imageId, species: 'dog' } });
+  assert.equal(r.statusCode, 502, r.body); assert.equal(r.json().code, 'provider_failed'); assert.deepEqual(f.fetched, []);
+  assert.equal(spaceHost(EDIT_SPACE), 'black-forest-labs-flux-1-kontext-dev.hf.space');
 });

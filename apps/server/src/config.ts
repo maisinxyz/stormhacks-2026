@@ -15,6 +15,8 @@ const schema = z.object({
   // Empty selects Replicate when its token is set, else the free Hugging Face Space.
   IMAGE_TO_3D_PROVIDER: z.enum(['', 'hf', 'replicate']).default(''),
   HF_TRELLIS_SPACE: z.string().regex(/^[\w.-]+\/[\w.-]+$/).default('trellis-community/TRELLIS'),
+  // Free /gen/reference edit when FAL_KEY is unset; any Space with FLUX.1 Kontext [dev]'s /infer signature.
+  HF_EDIT_SPACE: z.string().regex(/^[\w.-]+\/[\w.-]+$/).default('black-forest-labs/FLUX.1-Kontext-Dev'),
   HF_TOKEN: z.string().regex(/^(hf_\w+)?$/).default(''),
   REPLICATE_API_TOKEN: z.string().default(''),
   TRELLIS_VERSION: z.string().regex(/^[a-f0-9]{64}$/).default('e8f6c45206993f297372f5436b90350817bd9b4a0d52d2a76df50c1c8afa2b3c'),

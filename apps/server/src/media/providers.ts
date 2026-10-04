@@ -8,9 +8,12 @@ export interface GradioApp { predict(endpoint: string, data: unknown[] | Record<
 export interface Gradio { Client: { connect(space: string, options?: { hf_token?: `hf_${string}` }): Promise<GradioApp> }; handle_file(file: Blob): unknown }
 /** A free-tier quota error; retryAfter (seconds) comes from the Space's "Try again in HH:MM:SS". */
 export class QuotaError extends ApiError {
-  constructor(readonly retryAfter?: number) { super(429, 'gen_quota', 'The free 3D generator is out of GPU time; try again in a bit'); }
+  constructor(readonly retryAfter?: number) { super(429, 'gen_quota', 'The free generator is out of GPU time; try again in a bit'); }
 }
 const TRELLIS_PARAMS = { seed: 0, ss_guidance_strength: 7.5, ss_sampling_steps: 12, slat_guidance_strength: 3, slat_sampling_steps: 12, multiimage_algo: 'stochastic', mesh_simplify: .95, texture_size: 1024 };
+/** FLUX.1 Kontext [dev] Space `/infer` defaults; a fixed seed keeps retries reproducible. */
+const EDIT_PARAMS = { seed: 0, randomize_seed: false, guidance_scale: 2.5, steps: 28 };
+const EDIT_TIMEOUT_MS = 120000;
 export const spaceHost = (space: string) => `${space.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.hf.space`;
 function spaceError(e: unknown): ApiError {
   if (e instanceof ApiError) return e;
@@ -20,12 +23,12 @@ function spaceError(e: unknown): ApiError {
     return new QuotaError(t ? Number(t[1]) * 3600 + Number(t[2]) * 60 + Number(t[3]) : undefined);
   }
   if (/timed? ?out|timeout/i.test(message)) return new ApiError(504, 'gen_timeout');
-  return new ApiError(502, 'gen_failed', 'The free 3D generator could not complete the request');
+  return new ApiError(502, 'gen_failed', 'The free generator could not complete the request');
 }
 export class Providers {
   /** Injectable for tests; loaded lazily so mock/Replicate setups never import it. */
   gradio: Gradio | null = null;
-  /** Epoch ms until which the Space reported its free quota exhausted (shared anonymous/token identity). */
+  /** Epoch ms until which a Space reported the free quota exhausted (ZeroGPU quota belongs to the anonymous/token identity, shared across Spaces). */
   hfRetryAt = 0;
   constructor(readonly config: Config, readonly fetcher: Fetcher = fetch, gradio?: Gradio) { this.gradio = gradio ?? null; }
   async request(url: string, init: RequestInit = {}, timeout = 20000): Promise<Response> {
@@ -102,11 +105,11 @@ export class Providers {
     throw lastError;
   }
   /** Runs `fn` against a fresh Space session (one session per job: Gradio state is per session) under one deadline. */
-  private async space<T>(timeout: number, fn: (call: (endpoint: string, data: unknown[] | Record<string, unknown>) => Promise<unknown[]>, file: (png: Buffer) => unknown) => Promise<T>): Promise<T> {
+  private async space<T>(space: string, timeout: number, fn: (call: (endpoint: string, data: unknown[] | Record<string, unknown>) => Promise<unknown[]>, file: (png: Buffer) => unknown) => Promise<T>): Promise<T> {
     const wait = Math.ceil((this.hfRetryAt - Date.now()) / 1000);
     if (wait > 0) throw new QuotaError(wait);
     const gradio = this.gradio ??= await import('@gradio/client') as unknown as Gradio;
-    const space = this.config.HF_TRELLIS_SPACE, token = this.config.HF_TOKEN as `hf_${string}` | '';
+    const token = this.config.HF_TOKEN as `hf_${string}` | '';
     let app: GradioApp | undefined, finished = false, timer: NodeJS.Timeout | undefined;
     const work = (async () => {
       app = await gradio.Client.connect(space, token ? { hf_token: token } : {});
@@ -134,12 +137,18 @@ export class Providers {
   }
   /** Free background removal + crop via the Space; returns an RGBA PNG. */
   async hfSegment(png: Buffer) {
-    return this.space(60000, async (call, file) => this.download(this.fileUrl((await call('/preprocess_image', { image: file(png) }))[0]), 16 * 1024 * 1024, spaceHost(this.config.HF_TRELLIS_SPACE)));
+    const space = this.config.HF_TRELLIS_SPACE;
+    return this.space(space, 60000, async (call, file) => this.download(this.fileUrl((await call('/preprocess_image', { image: file(png) }))[0]), 16 * 1024 * 1024, spaceHost(space)));
+  }
+  /** Free instruction-based image edit (FLUX.1 Kontext [dev] Space `/infer`): one image + prompt in, one image out. */
+  async hfEdit(png: Buffer, prompt: string) {
+    const space = this.config.HF_EDIT_SPACE;
+    return this.space(space, EDIT_TIMEOUT_MS, async (call, file) => this.download(this.fileUrl((await call('/infer', { input_image: file(png), prompt, ...EDIT_PARAMS }))[0]), 16 * 1024 * 1024, spaceHost(space)));
   }
   /** Free TRELLIS on HF ZeroGPU: 1 image, or 3 via the Space's multi-image mode. Returns the raw Gaussian .ply (up axis -Y). */
   async hfTrellis(images: Buffer[]) {
-    const host = spaceHost(this.config.HF_TRELLIS_SPACE);
-    return this.space(this.config.GEN_TIMEOUT_MS, async (call, file) => {
+    const space = this.config.HF_TRELLIS_SPACE, host = spaceHost(space);
+    return this.space(space, this.config.GEN_TIMEOUT_MS, async (call, file) => {
       await call('/start_session', []);
       const pre: Buffer[] = [];
       for (const png of images) pre.push(await this.download(this.fileUrl((await call('/preprocess_image', { image: file(png) }))[0]), 16 * 1024 * 1024, host));

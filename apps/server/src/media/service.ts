@@ -22,6 +22,15 @@ export async function imagePng(bytes: Buffer) {
     return await img.rotate().resize(2048, 2048, { fit: 'inside', withoutEnlargement: true }).ensureAlpha().png().toBuffer();
   } catch { throw new ApiError(422, 'invalid_image', 'Upload a valid PNG, JPEG, or WebP image'); }
 }
+export type ReferenceKind = 'drawing' | 'photo';
+/** TRELLIS reconstructs best from one standing animal, whole body in frame, on a plain background. */
+export function referencePrompt(species: Species, kind: ReferenceKind) {
+  const animal = species === 'rodent' ? 'hamster' : species;
+  const shot = `${species === 'bird' ? 'standing' : 'standing on all four legs'}, full body side view, entire animal visible, centered, plain light gray studio background, soft even lighting, sharp focus`;
+  return kind === 'photo'
+    ? `The same ${animal} from this photo, ${shot}, head on the right. Keep its exact fur colors, markings, face, eye color, body proportions and breed unchanged.`
+    : `Transform this drawing into a photorealistic photo of a real ${animal}. Keep the same fur colors, markings, body shape and proportions from the drawing. ${shot[0].toUpperCase()}${shot.slice(1)}, single animal, no text.`;
+}
 export class MediaService {
   private inFlight = new Map<string, Promise<any>>();
   /** Live HF Space runs by job id. A pending HF job missing here was orphaned by a restart. */
@@ -46,10 +55,17 @@ export class MediaService {
     if (typeof output.image?.url !== 'string') throw new ApiError(502, 'provider_failed');
     return imagePng(await this.providers.download(output.image.url, 16 * 1024 * 1024));
   }
-  async reference(userId: string, imageId: string, species: Species) {
-    const image = await this.imageData(userId, imageId);
+  /** A standing, full-body, plain-background reference for image-to-3D, from a doodle or a photo of a sitting/lying pet. */
+  async reference(userId: string, imageId: string, species: Species, kind: ReferenceKind = 'drawing') {
+    const png = await this.imageBytes(userId, imageId);
     if (this.config.MOCK_GEN) return { imageId };
-    const output = await this.providers.fal('fal-ai/flux/dev/image-to-image', { image_url: image, strength: .75, num_images: 1, output_format: 'png', prompt: `A clean front-facing full-body ${species === 'rodent' ? 'hamster' : species}, preserving the character and colors of this doodle, all limbs visible, neutral rest pose, plain white background, no text.` });
+    const prompt = referencePrompt(species, kind);
+    if (!this.config.FAL_KEY) {
+      // Free: FLUX.1 Kontext on an HF Space. Transparent cutouts become white; ~1 MP is the model's native size.
+      const input = await sharp(png).flatten({ background: '#ffffff' }).resize(1024, 1024, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+      return this.upload(userId, await this.providers.hfEdit(input, prompt));
+    }
+    const output = await this.providers.fal('fal-ai/flux/dev/image-to-image', { image_url: `data:image/png;base64,${png.toString('base64')}`, strength: .75, num_images: 1, output_format: 'png', prompt });
     if (typeof output.images?.[0]?.url !== 'string') throw new ApiError(502, 'provider_failed');
     return this.upload(userId, await this.providers.download(output.images[0].url, 16 * 1024 * 1024));
   }
