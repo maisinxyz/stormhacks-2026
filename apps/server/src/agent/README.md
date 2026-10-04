@@ -80,10 +80,12 @@ Google Drive/Calendar/Sheets, Slack, GitHub, Notion, Linear, and hundreds more. 
 | `MOCK_AGENT` / `MOCK_CONNECTORS` | off | Scripted agent / seeded Gmail-Drive-Calendar. These are also the demo fallbacks. |
 | `MOCK_AGENT_DELAY_MS` | 700 | Pacing between mock agent turns. |
 | `MOCK_NOTIFY_ARRIVAL_MS` | 20000 | Mock "new email" arrival after the notifications stream connects. |
-| `ANTHROPIC_API_KEY` | | Needed for the real agent. |
+| `MODEL_PROVIDER` | `gemini` | `gemini` or `anthropic`. |
+| `GEMINI_API_KEY` | | Needed when `MODEL_PROVIDER=gemini` and `MOCK_AGENT=0`. |
+| `ANTHROPIC_API_KEY` | | Needed when `MODEL_PROVIDER=anthropic` and `MOCK_AGENT=0`. |
 | `COMPOSIO_API_KEY` | | Any-app tools with automatic connect (see above). |
 | `COMPOSIO_CALLBACK_URL` | `WEB_ORIGIN/?connected=app` | Where the browser lands after an app sign-in. |
-| `AGENT_MODEL` / `AGENT_EFFORT` | `claude-opus-5-5` / `low` | |
+| `AGENT_MODEL` / `AGENT_EFFORT` | `gemini-2.5-flash` / `low` | `AGENT_EFFORT` applies to Anthropic; Gemini uses its own generation settings. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | | OAuth app in test mode, with the demo account as a tester. Redirect: `…/auth/google/callback`. |
 | `WEB_ORIGIN` | `http://localhost:5173` | Where OAuth redirects back to. |
 | `SESSION_SECRET` | dev-only | Signs cookies. **Set it in any deploy.** |

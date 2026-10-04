@@ -78,7 +78,17 @@ function openExternal(url) {
 function setInteractive(on, focus) {
   if (!win) return;
   if (on !== interactive) { interactive = on; win.setIgnoreMouseEvents(!on, { forward: true }); }
-  if (focus === true) { win.setFocusable(true); win.focus(); win.webContents.focus(); }
+  if (focus === true) {
+    // A transparent overlay starts non-focusable and click-through. Re-enable
+    // both at the native window level before asking the renderer to focus its
+    // input; otherwise the visible form cannot receive keyboard events.
+    win.setIgnoreMouseEvents(false, { forward: true });
+    win.setFocusable(true);
+    if (!win.isVisible()) win.show();
+    win.focus();
+    win.webContents.focus();
+    win.webContents.executeJavaScript("document.getElementById('task-input')?.focus()", true).catch(() => {});
+  }
   else if (focus === false) { win.setFocusable(false); win.blur(); }
 }
 

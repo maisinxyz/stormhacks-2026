@@ -14,6 +14,7 @@ import { composioGateway, type ComposioGateway } from '../connectors/composio';
 import { RunHub } from './hub';
 import { toolset } from './toolset';
 import { claudeBrain } from './llm';
+import { geminiBrain } from './gemini';
 import { mockBrain } from './mockBrain';
 import { notificationRoutes, type NotifyOptions } from './notifications';
 import { agentRoutes } from './routes';
@@ -26,7 +27,7 @@ export interface B1Options {
   media: MediaService;
   store?: B1Store;
   config?: Partial<B1Config>;
-  /** Overrides the agent brain (tests). Defaults to MOCK_AGENT's scripts or Claude. */
+  /** Overrides the agent brain (tests). Defaults to MOCK_AGENT's scripts or the configured model provider. */
   brain?: Brain;
   notify?: Partial<NotifyOptions>;
   /** Overrides the Composio gateway (tests). Defaults to a real one when COMPOSIO_API_KEY is set. */
@@ -64,7 +65,9 @@ export async function registerB1(app: FastifyInstance, opts: B1Options) {
   const hub = new RunHub(ctx.store);
   const brain = opts.brain ?? (config.mockAgent
     ? mockBrain(Number(process.env.MOCK_AGENT_DELAY_MS ?? 700))
-    : claudeBrain({ agentModel: config.agentModel, effort: (process.env.AGENT_EFFORT as 'low') ?? 'low' }, undefined, ctx.tools));
+    : config.modelProvider === 'gemini'
+      ? geminiBrain({ apiKey: config.gemini.apiKey, agentModel: config.agentModel }, undefined, ctx.tools)
+      : claudeBrain({ agentModel: config.agentModel, effort: (process.env.AGENT_EFFORT as 'low') ?? 'low' }, undefined, ctx.tools));
   const runner = new AgentRunner(ctx, hub, new ApprovalGate(), brain);
 
   await authRoutes(app, ctx);
@@ -72,4 +75,3 @@ export async function registerB1(app: FastifyInstance, opts: B1Options) {
   await notificationRoutes(app, ctx, opts.notify);
   return { ctx, hub, runner };
 }
-

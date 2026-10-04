@@ -67,6 +67,13 @@ const mouse = { x: -1, y: -1, down: false, lastUi: 0 };
 const overUi = (x: number, y: number) => !!(document.elementFromPoint(x, y) as HTMLElement | null)?.closest('.ui');
 function updateInteractive() {
   if (mouse.x < 0) return;
+  // A task form must stay interactive even after the cursor leaves the pet/menu.
+  // Otherwise the transparent Electron window becomes click-through before the
+  // user can click the input and type.
+  if (!task.hidden) {
+    bridge.setInteractive(true);
+    return;
+  }
   const ui = overUi(mouse.x, mouse.y);
   if (ui) mouse.lastUi = performance.now();
   bridge.setInteractive(mouse.down || ui || engine.hitTest(mouse.x, mouse.y));
@@ -133,7 +140,7 @@ function openTask() {
   placeNear(task);
   bridge.setInteractive(true, true); // take keyboard focus so the user can type
   taskInput.value = '';
-  setTimeout(() => taskInput.focus(), 30);
+  requestAnimationFrame(() => { taskInput.focus(); taskInput.select(); });
 }
 function closeTask() {
   if (task.hidden) return;
@@ -144,7 +151,14 @@ function closeTask() {
 }
 task.addEventListener('submit', e => { e.preventDefault(); const t = taskInput.value; closeTask(); void agent.start(t); });
 taskInput.addEventListener('keydown', e => { if (e.key === 'Escape') closeTask(); });
-window.addEventListener('blur', () => { if (!taskInput.value) closeTask(); });
+window.addEventListener('blur', () => {
+  // Electron can emit a transient window blur while handing focus to the input.
+  // Do not dismiss an empty task form during that hand-off.
+  if (!task.hidden && document.activeElement !== taskInput && taskInput.value) closeTask();
+});
+window.addEventListener('focus', () => {
+  if (!task.hidden && document.activeElement !== taskInput) taskInput.focus();
+});
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeMenu();
   if (agent.approvalOpen && e.target === document.body && e.key === 'Enter') void agent.approve();
