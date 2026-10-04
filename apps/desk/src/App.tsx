@@ -49,6 +49,13 @@ function App() {
   const peekCanvas = useRef<HTMLCanvasElement>(null)
   const recognition = useRef<ReturnType<typeof getSpeechRecognition>>(null)
 
+  const openPlay = () => {
+    const petId = encodeURIComponent(pet?.id ?? 'dog')
+    const configuredOrigin = (import.meta.env.VITE_PLAY_APP_URL as string | undefined)?.replace(/\/$/, '')
+    const origin = configuredOrigin || (import.meta.env.DEV ? 'http://localhost:5174' : '')
+    location.href = `${origin}/camera.html?pet=${petId}`
+  }
+
   const setListening = (value: boolean) => setVoice({ listening: value })
   const setSpeaking = (value: boolean) => setVoice({ speaking: value })
   const setMicAvailable = (value: boolean) => setVoice({ micAvailable: value })
@@ -169,7 +176,7 @@ function App() {
         <div className="top-actions"><span className="demo-pill"><span className="demo-dot" /> Demo mode</span><span className="connection-pill"><span className="online-dot" /> All systems good</span><button className="icon-button" aria-label="Search"><Search size={18} /></button><button className="icon-button" aria-label="Notifications" onClick={openNotifications}><Bell size={18} /><span className="notification-dot" /></button></div>
       </header>
       <section className="desk-canvas" aria-label="Fetch Desk workspace">
-        <div className="desk-heading"><div><span className="eyebrow">Good morning, Vince</span><h1>What should we fetch?</h1></div><div className="mode-switch" role="group" aria-label="Mode"><button className={mode === 'work' ? 'selected' : ''} onClick={(e) => { e.stopPropagation(); setDeskMode('work') }}>Work</button><button className={mode === 'play' ? 'selected play-selected' : ''} onClick={(e) => { e.stopPropagation(); setDeskMode('play') }}><Sparkles size={14} /> Play</button></div></div>
+        <div className="desk-heading"><div><span className="eyebrow">Good morning, Vince</span><h1>What should we fetch?</h1></div><div className="mode-switch" role="group" aria-label="Mode"><button className={mode === 'work' ? 'selected' : ''} onClick={(e) => { e.stopPropagation(); setDeskMode('work') }}>Work</button><button className={mode === 'play' ? 'selected play-selected' : ''} onClick={(e) => { e.stopPropagation(); openPlay() }}><Sparkles size={14} /> Play</button></div></div>
         {mode === 'play' && <div className="connectors-banner"><Sparkles size={14} /><span><strong>Play mode</strong> · Gmail, Drive, and Calendar are taking a nap.</span><button onClick={() => setDeskMode('work')}>Return to Work</button></div>}
         <div className={`command-bar ${listening ? 'listening' : ''} ${speaking ? 'speaking' : ''}`} onClick={(e) => e.stopPropagation()}><button className="command-icon mic-button" onClick={listening ? stopListening : startListening} aria-label={listening ? 'Stop listening' : 'Start listening'}><Mic size={19} /></button><input value={command} onChange={(e) => setCommand(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendCommand()} placeholder={listening ? 'Listening…' : mode === 'work' ? 'Ask Pip to find, read, or organise something…' : 'Tell Pip what to play…'} aria-label="Command Pip" /><span className="command-hint">{listening ? 'Listening' : <>Hold <kbd>Space</kbd> to talk</>}</span><button className="command-submit" onClick={sendCommand} aria-label="Send command"><ChevronDown size={18} className="send-chevron" /></button></div>
         <div className="canvas-world">

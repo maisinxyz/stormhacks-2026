@@ -2,7 +2,8 @@
   "name": "fetch",
   "private": true,
   "scripts": {
-    "dev": "pnpm --filter @fetch/web dev",
+    "dev": "node scripts/dev-all.mjs",
+    "dev:web": "pnpm --filter @fetch/web dev",
     "dev:desk": "pnpm --filter @fetch/desk dev",
     "typecheck": "pnpm -r typecheck",
     "gen:bundles": "pnpm --filter @fetch/web gen:bundles"

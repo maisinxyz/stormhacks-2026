@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { ActionStep, BusEvent, LocalIntent, Mode, Mood, PetBundle, PetEngine, Platform, RunEvent, Species } from '@fetch/contracts';
 import { Bus } from './bus';
 import { generatePet as runPipeline } from './pipeline/generate';
-import { Behavior, type BehaviorHost } from './behavior';
+import { Behavior, type BehaviorHost, type FurnitureSpot } from './behavior';
 import { Interactions } from './interactions';
 import { Needs, type Stats } from './needs';
 import { Toys } from './toys';
@@ -58,6 +58,13 @@ export class Engine implements PetEngine {
   private renderer!: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(35, 1, 0.05, 50);
+  private view: 'desk' | 'room' | 'camera' = 'desk';
+  private externalCamera = false;
+  private groundPlane = 0;
+  private petScale = 1;
+  private overlay?: THREE.Scene;
+  private claimedGestures = new Set<number>();
+  private furnitureSpots: FurnitureSpot[] = [];
   private splat?: SplatMesh;
   private mode: Mode = 'work';
   private platforms: Platform[] = [];
@@ -131,9 +138,10 @@ export class Engine implements PetEngine {
     const o = this.beh!.update(dt), m = this.splat!.mesh;
     for (const b of this.bones) this.setBoneEuler(b.name, 0, 0, 0);
     for (const [n, e] of Object.entries(o.pose.bones)) this.setBoneEuler(n, e[0], e[1], e[2]);
-    m.position.set(o.x, o.y, 0);
+    m.position.set(o.x, o.y, o.z);
     m.rotation.y = o.yaw;
-    if (this.shadow) { this.shadow.position.set(o.x, this.beh!.y + 0.002, 0); this.shadow.visible = m.visible; }
+    m.scale.setScalar(this.petScale);
+    if (this.shadow) { this.shadow.position.set(o.x, this.groundPlane + 0.002, o.z); this.shadow.scale.setScalar(this.petScale); this.shadow.visible = m.visible; }
   }
 
   // World position of the species' carry socket (mouth / cheek / talons), from the posed bone.
@@ -148,12 +156,14 @@ export class Engine implements PetEngine {
     const r = this.renderer.domElement.getBoundingClientRect();
     const ray = new THREE.Raycaster();
     ray.setFromCamera(new THREE.Vector2(((px - r.left) / r.width) * 2 - 1, -((py - r.top) / r.height) * 2 + 1), this.camera);
+    if (this.view === 'room' || this.view === 'camera') return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -this.groundPlane), new THREE.Vector3()) ?? undefined;
     return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), new THREE.Vector3()) ?? undefined;
   }
 
   private host(): BehaviorHost {
     return {
       bounds: () => {
+        if (this.view === 'room' || this.view === 'camera') return { xmin: -1.75, xmax: 1.75, zmin: -1.75, zmax: 1.75 };
         const r = this.renderer.domElement.getBoundingClientRect();
         const a = this.toWorld(r.left + 4, r.top + r.height / 2), b = this.toWorld(r.right - 4, r.top + r.height / 2);
         return { xmin: a?.x ?? -2, xmax: b?.x ?? 2 };
@@ -187,11 +197,14 @@ export class Engine implements PetEngine {
       feed: (item: FeedItem) => this.feedItem(item),
       holdBall: (x: number, y: number) => this.toys?.hold(x, y),
       releaseBall: (vx: number, vy: number) => { this.toys?.release(vx, vy); this.beh?.fetchBall(); },
-      point: (x: number) => this.beh?.pointTo(x),
+      point: (x: number, z?: number) => this.beh?.pointTo(x, this.view === 'room' || this.view === 'camera' ? z : undefined),
+      dragPet: (x: number, z: number, drop: boolean) => this.beh?.dragTo(x, z, drop),
       cursor: (x: number, y: number) => { this.cursorAt = { x, y, t: performance.now() }; this.beh?.setCursor(x, y); },
       approval: () => ({ pending: this.approvalPending, actionId: this.approvalActionId }),
       setRing: (p: number) => this.setRing(p),
       mode: () => this.mode,
+      isGestureClaimed: (pointerId: number) => this.claimedGestures.has(pointerId),
+      furnitureSpots: () => this.furnitureSpots,
     };
   }
 
@@ -319,7 +332,7 @@ export class Engine implements PetEngine {
     g.addColorStop(0, 'rgba(0,0,0,0.35)'); g.addColorStop(1, 'rgba(0,0,0,0)');
     x.fillStyle = g; x.fillRect(0, 0, 64, 64);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
+      new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, depthTest: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
     m.position.y = 0.002;
     m.renderOrder = -1;
     return m;
@@ -339,6 +352,17 @@ export class Engine implements PetEngine {
 
   // --- PetEngine surface; F1 slice 0-5h implements loading/skinning only. TODOs land in later slices. ---
   setMode(mode: Mode) { this.mode = mode; this.beh?.setMode(mode); }
+  setView(v: 'desk' | 'room' | 'camera', opts?: { petScale?: number }) { this.view = v; this.petScale = opts?.petScale ?? (v === 'room' ? 0.55 : v === 'camera' ? 0.45 : 1); this.setGroundPlane(v === 'desk' ? 0 : this.groundPlane); }
+  setExternalCamera(on: boolean) { this.externalCamera = on; }
+  get cameraRef() { return this.camera; }
+  setOverlayScene(scene: THREE.Scene | null) { if (this.overlay) this.scene.remove(this.overlay); this.overlay = scene ?? undefined; if (this.overlay) { this.overlay.renderOrder = -10; this.scene.add(this.overlay); } }
+  setGroundPlane(y: number) { this.groundPlane = y; }
+  setFurnitureSpots(spots: FurnitureSpot[]) { this.furnitureSpots = spots; }
+  setSplatDepthTest(on: boolean) { this.splat?.setDepthTest(on); }
+  claimGesture(pointerId: number) { if (this.claimedGestures.has(pointerId)) return false; this.claimedGestures.add(pointerId); return true; }
+  releaseGesture(pointerId: number) { this.claimedGestures.delete(pointerId); }
+  getPetState() { return this.beh?.snapshot() ?? { x: 0, z: 0, heading: 0, y: 0, state: 'idle' as const }; }
+  applyPetState(s: { x: number; z: number; heading?: number; y?: number }) { this.beh?.applySnapshot(s); }
   setPlatforms(p: Platform[]) { this.platforms = p; this.syncToyPlatforms(); }
   runPlan(steps: ActionStep[]) { this.pushToolEvent({ type: 'run.plan', steps }); }
   pushToolEvent(e: RunEvent) {
