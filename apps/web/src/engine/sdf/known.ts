@@ -28,8 +28,8 @@ export const KNOWN_DOGS: KnownDog[] = [
     // Rottweiler: black coat with tan muzzle and feet, broad head, short muzzle, small folded ears, heavy build, stub tail
     id: 'rottweiler', name: 'Bruno', species: 'dog', photo: new URL('../../../../../assets/rottweiler.png', import.meta.url).href,
     traits: {
-      bodyLength: 0.9, girth: 0.31, legLength: 0.27, headSize: 0.28, snout: 0.14, earShape: 0.08, earSize: 0.8, tailLength: 0.1, tailUp: 0.5, size: 1.15,
-      colors: { base: '#2B2526', belly: '#332A28', ear: '#1E1A1A', muzzle: '#B26A32', paws: '#B26A32', tailTip: '#2B2526', nose: '#0C0A0A', eye: '#2A160B' },
+      bodyLength: 0.9, girth: 0.31, legLength: 0.27, headSize: 0.28, snout: 0.14, earShape: 0.12, earSize: 1.1, tailLength: 0.1, tailUp: 0.5, size: 1.15,
+      colors: { base: '#2B2526', belly: '#332A28', ear: '#443A3B', muzzle: '#B26A32', paws: '#B26A32', tailTip: '#2B2526', nose: '#0C0A0A', eye: '#2A160B' },
     },
   },
   {
