@@ -64,7 +64,9 @@ export class SplatMesh {
     uViewport: { value: new THREE.Vector2(1, 1) },
     uFocal: { value: new THREE.Vector2(1, 1) },
   };
-  readonly count: number;
+  count: number;
+  readonly total: number;
+  private base: Float32Array[] = []; // pre-shuffled full-resolution copy, so any prefix is a uniform subsample
   private geo = new THREE.InstancedBufferGeometry();
   private centers: Float32Array;
   private attrs: THREE.InstancedBufferAttribute[] = [];
@@ -72,7 +74,7 @@ export class SplatMesh {
 
   // splat: .splat bytes (32B/splat: pos3f scale3f rgba4u8 rot4u8); weights: 8B/splat (4 idx + 4 weight)
   constructor(splat: ArrayBuffer, weights: ArrayBuffer) {
-    const n = (this.count = splat.byteLength / 32);
+    const n = (this.count = this.total = splat.byteLength / 32);
     const f = new Float32Array(splat), u = new Uint8Array(splat), w = new Uint8Array(weights);
     const center = new Float32Array(n * 3), scale = new Float32Array(n * 3), color = new Float32Array(n * 4),
       rot = new Float32Array(n * 4), bi = new Float32Array(n * 4), bw = new Float32Array(n * 4);
@@ -85,6 +87,16 @@ export class SplatMesh {
         bw[i * 4 + k] = w[i * 8 + 4 + k] / 255;
       }
     }
+    // seeded shuffle so a budget prefix is an unbiased subsample
+    const order = Uint32Array.from({ length: n }, (_, i) => i);
+    let r = 1;
+    for (let i = n - 1; i > 0; i--) { r = (r * 1664525 + 1013904223) >>> 0; const j = r % (i + 1); [order[i], order[j]] = [order[j], order[i]]; }
+    const arrs = [center, scale, color, rot, bi, bw], sizes = [3, 3, 4, 4, 4, 4];
+    arrs.forEach((a, ai) => {
+      const t = new Float32Array(a.length), s = sizes[ai];
+      for (let i = 0; i < n; i++) for (let k = 0; k < s; k++) t[i * s + k] = a[order[i] * s + k];
+      a.set(t); this.base.push(t.slice());
+    });
     this.centers = center.slice();
     this.geo.setAttribute('corner', new THREE.BufferAttribute(new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]), 2));
     this.geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3)); // three requires one
@@ -105,6 +117,17 @@ export class SplatMesh {
     });
     this.mesh = new THREE.Mesh(this.geo, mat);
     this.mesh.frustumCulled = false;
+  }
+
+  /** Render only the first `n` shuffled splats (quality `high` 300k / `low` 120k). */
+  setBudget(n: number) {
+    const c = Math.min(n, this.total);
+    if (c === this.count) return;
+    this.count = c;
+    this.attrs.forEach((a, i) => { const s = a.itemSize; (a.array as Float32Array).set(this.base[i].subarray(0, c * s)); a.needsUpdate = true; });
+    this.centers = this.base[0].slice(0, c * 3);
+    this.geo.instanceCount = c;
+    this.lastDir.set(9, 9, 9); // force resort
   }
 
   update(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera) {

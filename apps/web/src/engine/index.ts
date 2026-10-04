@@ -1,11 +1,32 @@
 import * as THREE from 'three';
 import type { ActionStep, BusEvent, LocalIntent, Mode, Mood, PetBundle, PetEngine, Platform, RunEvent, Species } from '@fetch/contracts';
 import { Bus } from './bus';
+import { generatePet as runPipeline } from './pipeline/generate';
 import { MAX_BONES, SplatMesh } from './splatRenderer';
 
 interface Bone { name: string; parent: number; head: [number, number, number]; tail: [number, number, number] }
 
+export type Quality = 'high' | 'low';
+const BUDGET: Record<Quality, number> = { high: 300_000, low: 120_000 };
+
+// Ray vs capsule (segment + radius): true if the closest distance between the ray and the segment <= r.
+function rayHitsCapsule(o: THREE.Vector3, d: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3, r: number) {
+  const u = d, v = b.clone().sub(a), w = o.clone().sub(a);
+  const bb = u.dot(v), cc = v.dot(v), dd = u.dot(w), ee = v.dot(w), den = cc - bb * bb; // |u|=1
+  let t = den > 1e-9 ? (bb * ee - cc * dd) / den : 0, s = cc > 0 ? (ee + bb * t) / cc : 0;
+  s = Math.max(0, Math.min(1, s)); t = Math.max(0, u.dot(a.clone().addScaledVector(v, s).sub(o)));
+  return o.clone().addScaledVector(u, t).distanceTo(a.clone().addScaledVector(v, s)) <= r;
+}
+
+export interface EngineOptions { apiBase?: string }
+
 export class Engine implements PetEngine {
+  constructor(private opts: EngineOptions = {}) {}
+  private quality: Quality = 'high';
+  private lowSince = 0;
+  private boneWorld: THREE.Matrix4[] = [];
+  private shadow?: THREE.Mesh;
+
   private bus = new Bus();
   private renderer!: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
@@ -23,7 +44,16 @@ export class Engine implements PetEngine {
     this.renderer.setClearColor(0x000000, 0);
     this.camera.position.set(1.6, 1.0, 2.4);
     this.camera.lookAt(0, 0.5, 0);
+    this.shadow = this.makeShadow();
+    this.scene.add(this.shadow);
+    canvas.style.pointerEvents = 'none';
+    window.addEventListener('pointermove', e => {
+      canvas.style.pointerEvents = this.hitTest(e.clientX, e.clientY) ? 'auto' : 'none';
+    });
+    let prev = 0;
     const loop = (t: number) => {
+      const dt = t / 1000 - prev; prev = t / 1000;
+      this.watchFps(dt);
       this.raf = requestAnimationFrame(loop);
       this.resize();
       this.onFrame?.(t / 1000);
@@ -48,6 +78,7 @@ export class Engine implements PetEngine {
     this.bones = rig.bones;
     this.pose = this.bones.map(() => new THREE.Quaternion());
     this.splat = new SplatMesh(splat, weights);
+    this.splat.setBudget(BUDGET[this.quality]);
     this.scene.add(this.splat.mesh);
   }
 
@@ -69,6 +100,45 @@ export class Engine implements PetEngine {
       world[i] = b.parent >= 0 ? world[b.parent].clone().multiply(m) : m;
       out[i].copy(world[i]);
     });
+    this.boneWorld = world;
+  }
+
+  /** F2 settings: splat budget. Auto-drops to `low` if fps < 24 for 3s. */
+  setQuality(q: Quality) { this.quality = q; this.lowSince = 0; this.splat?.setBudget(BUDGET[q]); }
+
+  private watchFps(dt: number) {
+    if (!dt || this.quality === 'low') return;
+    if (1 / dt >= 24) { this.lowSince = 0; return; }
+    this.lowSince += dt;
+    if (this.lowSince > 3) this.setQuality('low');
+  }
+
+  /** Cheap hit proxy: one capsule per posed bone. Lets F2's page stay clickable under the full-page canvas. */
+  hitTest(clientX: number, clientY: number): boolean {
+    if (!this.splat || !this.boneWorld.length) return false;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    return this.bones.some((b, i) => {
+      const len = new THREE.Vector3(...b.head).distanceTo(new THREE.Vector3(...b.tail));
+      const a = new THREE.Vector3(...b.head).applyMatrix4(this.boneWorld[i]), e = new THREE.Vector3(...b.tail).applyMatrix4(this.boneWorld[i]);
+      return rayHitsCapsule(ray.ray.origin, ray.ray.direction, a, e, Math.max(0.07, 0.2 * len));
+    });
+  }
+
+  // Blob contact shadow decal on the ground plane (y=0).
+  private makeShadow() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const x = c.getContext('2d')!, g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, 'rgba(0,0,0,0.35)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
+    m.position.y = 0.002;
+    m.renderOrder = -1;
+    return m;
   }
 
   private resize() {
@@ -92,9 +162,9 @@ export class Engine implements PetEngine {
   setApprovalPending(_pending: boolean) { /* TODO */ }
   doIntent(_i: LocalIntent) { /* TODO: behavior state machine */ }
   setSpeaking(_amplitude: number) { /* TODO */ }
-  generatePet(_input: { kind: 'photo' | 'drawing'; image: Blob; species: Species; name: string },
-              _onProgress: (p: { stage: string; pct: number }) => void): Promise<PetBundle> {
-    return Promise.reject(new Error('generatePet not implemented yet'));
+  generatePet(input: { kind: 'photo' | 'drawing'; image: Blob; species: Species; name: string },
+              onProgress: (p: { stage: string; pct: number }) => void): Promise<PetBundle> {
+    return runPipeline(this.opts.apiBase ?? '', input, onProgress, BUDGET[this.quality]);
   }
   on<T extends BusEvent['type']>(t: T, cb: (e: Extract<BusEvent, { type: T }>) => void) { this.bus.on(t, cb); }
 }
