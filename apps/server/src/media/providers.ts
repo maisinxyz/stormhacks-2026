@@ -10,7 +10,8 @@ export class Providers {
       const r = await this.fetcher(url, { ...init, signal: AbortSignal.timeout(timeout), redirect: 'error' });
       if (!r.ok) {
         await r.body?.cancel();
-        throw new ApiError(r.status === 429 ? 429 : 502, r.status === 429 ? 'rate_limited' : 'provider_failed', 'Media provider could not complete the request');
+        const code = r.status === 429 ? 'rate_limited' : r.status >= 500 ? 'provider_unavailable' : 'provider_failed';
+        throw new ApiError(r.status === 429 ? 429 : 502, code, 'Media provider could not complete the request');
       }
       return r;
     } catch (e) {

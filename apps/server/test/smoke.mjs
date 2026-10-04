@@ -6,6 +6,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import sharp from 'sharp';
 
 const root = new URL('../', import.meta.url);
 const dir = await mkdtemp(join(tmpdir(), 'fetch-smoke-'));
@@ -37,9 +38,21 @@ try {
   assert.equal((await health.json()).mockGen, true);
   const session = await fetch(`${base}/session`); assert.equal(session.status, 200); assert.equal((await session.json()).user.id, 'demo-user');
   const pets = await fetch(`${base}/pets`); assert.equal(pets.status, 200); assert.deepEqual(await pets.json(), []);
+  const png = await sharp({ create: { width: 16, height: 16, channels: 4, background: '#f0c060' } }).png().toBuffer();
+  const form = new FormData(); form.append('image', new Blob([new Uint8Array(png)]), 'photo.png');
+  const upload = await fetch(`${base}/uploads`, { method: 'POST', body: form }); assert.equal(upload.status, 200);
+  const { imageId } = await upload.json();
+  for (const species of ['dog', 'bird']) {
+    const start = await fetch(`${base}/gen/image-to-3d`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ imageIds: [imageId], species }) });
+    assert.equal(start.status, 200); const { jobId } = await start.json();
+    const job = await fetch(`${base}/gen/jobs/${jobId}`); assert.equal(job.status, 200);
+    const result = await job.json(); assert.equal(result.status, 'done', JSON.stringify(result));
+    const asset = await fetch(result.splatUrl); assert.equal(asset.status, 200);
+    assert.equal(Buffer.from(await asset.arrayBuffer()).subarray(0, 4).toString(), 'ply\n');
+  }
   const voice = await fetch(`${base}/voice/tts`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'Hello!' }) });
   assert.equal(voice.status, 200); assert.equal(Buffer.from(await voice.arrayBuffer()).subarray(0, 4).toString(), 'RIFF');
-  console.log('Compiled server smoke passed: startup, health, B1 session, B2 pets, streamed audio.');
+  console.log('Compiled server smoke passed: startup, health, B1 session, B2 pets, dog/bird generation and assets, streamed audio.');
 } finally {
   child.kill('SIGTERM'); await exited;
   const target = resolve(dir); assert.ok(target.startsWith(resolve(tmpdir()) + sep) && basename(target).startsWith('fetch-smoke-'));

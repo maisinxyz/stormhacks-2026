@@ -251,3 +251,38 @@ test('compressed asset responses preserve CORS Vary and authentication errors fa
   closeLater.push(() => unauthenticated.app.close());
   assert.equal((await unauthenticated.app.inject({ url: '/pets' })).statusCode, 401);
 });
+
+test('browser preflights permit pet updates and deletion from the configured web origin', async t => {
+  const { app } = await fixture(t);
+  for (const method of ['PATCH', 'DELETE']) {
+    const response = await app.inject({ method: 'OPTIONS', url: '/pets', headers: {
+      origin: 'http://localhost:5173', 'access-control-request-method': method,
+      'access-control-request-headers': 'content-type'
+    } });
+    assert.equal(response.statusCode, 204);
+    assert.equal(response.headers['access-control-allow-origin'], 'http://localhost:5173');
+    assert.equal(response.headers['access-control-allow-credentials'], 'true');
+    assert.ok(String(response.headers['access-control-allow-methods']).split(/,\s*/).includes(method));
+  }
+});
+
+test('temporary provider outages keep an existing prediction pollable until it recovers', async t => {
+  let recovering = false; let rawPly: Buffer;
+  const fetcher: typeof fetch = async input => {
+    const url = String(input);
+    if (url.endsWith('/predictions')) return Response.json({ id: 'recoverable-prediction' });
+    if (url.endsWith('/recoverable-prediction')) return recovering
+      ? Response.json({ status: 'succeeded', output: { gaussian_ply: 'https://replicate.delivery/recovered.ply' } })
+      : new Response('Temporary outage', { status: 503 });
+    if (url === 'https://replicate.delivery/recovered.ply') return new Response(new Uint8Array(rawPly));
+    throw new Error(`Unexpected URL ${url}`);
+  };
+  const { app, config, png, form } = await fixture(t, { MOCK_GEN: '0', REPLICATE_API_TOKEN: 'test-key' }, fetcher);
+  rawPly = await mockPly(config.bundleDir, 'dog');
+  const imageId = (await form('/uploads', { image: png })).json().imageId;
+  const start = await app.inject({ method: 'POST', url: '/gen/image-to-3d', payload: { imageIds: [imageId], species: 'dog' } });
+  const jobPath = `/gen/jobs/${start.json().jobId}`;
+  assert.equal((await app.inject({ url: jobPath })).json().status, 'pending');
+  recovering = true;
+  assert.equal((await app.inject({ url: jobPath })).json().status, 'done');
+});

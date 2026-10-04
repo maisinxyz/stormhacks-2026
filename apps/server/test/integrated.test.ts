@@ -13,12 +13,13 @@ import type { Brain } from '../src/agent/brain.js';
 import { mockWorkspace } from '../src/connectors/mock.js';
 import { generatePet } from '../../web/src/engine/pipeline/generate.js';
 
-async function setup(t: import('node:test').TestContext, options: { strict?: boolean; brain?: Brain } = {}) {
+async function setup(t: import('node:test').TestContext, options: { strict?: boolean; brain?: Brain; google?: boolean } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'fetch-integrated-'));
   const config = readConfig({ NODE_ENV: 'test', DATA_DIR: dir, DEV_AUTH: '0', MOCK_GEN: '1', MOCK_VOICE: '1' });
   const userId = `integration-${randomUUID()}`;
   const server = await buildFetchApp({ config, logger: false, b1: {
-    config: { mockAgent: true, mockConnectors: true, demoUserId: userId, requireLogin: !!options.strict, sessionSecret: 'integration-private-session-secret' },
+    config: { mockAgent: true, mockConnectors: true, demoUserId: userId, requireLogin: !!options.strict, sessionSecret: 'integration-private-session-secret',
+      ...(options.google ? { google: { clientId: 'test-client-id', clientSecret: 'test-client-secret', redirectUri: 'http://localhost:3001/auth/google/callback' } } : {}) },
     brain: options.brain ?? mockBrain(0), notify: { mockArrivalMs: 0 }
   } });
   t.after(async () => {
@@ -65,6 +66,28 @@ test('B1 session and B2 media share signed-cookie auth, and pet ownership is enf
   const own = await a.app.inject({ method: 'POST', url: '/agent/run', headers: { cookie: alice }, payload: { petId: p.id, text: 'find my budget sheet' } });
   assert.equal(own.statusCode, 200, own.body); const events = await eventsUntil(a, own.json().runId, 'run.result');
   assert.ok(events.some(e => e.type === 'run.plan')); assert.ok(events.some(e => e.type === 'tool.end'));
+});
+
+test('strict login can start OAuth without granting an anonymous media session', async t => {
+  const a = await setup(t, { strict: true, google: true });
+  const start = await a.app.inject({ url: '/auth/google/start' });
+  assert.equal(start.statusCode, 302, start.body);
+  assert.equal(new URL(String(start.headers.location)).hostname, 'accounts.google.com');
+  const stateCookie = start.cookies.find(cookie => cookie.name === 'fetch_oauth_state');
+  assert.ok(stateCookie);
+  const state = a.app.unsignCookie(stateCookie.value); assert.equal(state.valid, true);
+  const pendingUserId = state.value!.split('.')[1];
+  assert.notEqual(pendingUserId, a.userId);
+  assert.equal(await a.b1.ctx.store.getUser(pendingUserId), undefined);
+  assert.ok(!start.cookies.some(cookie => cookie.name === 'fetch_uid'));
+  assert.equal((await a.app.inject({ url: '/pets', headers: { cookie: `fetch_oauth_state=${stateCookie.value}` } })).statusCode, 401);
+  const callback = await a.app.inject({ url: '/auth/google/callback?code=fake&state=wrong', headers: { cookie: `fetch_oauth_state=${stateCookie.value}` } });
+  assert.match(String(callback.headers.location), /connect_error=invalid_state/);
+  assert.ok(!callback.cookies.some(cookie => cookie.name === 'fetch_uid'));
+  const alice = await a.userCookie('alice');
+  const reconnect = await a.app.inject({ url: '/auth/google/start', headers: { cookie: alice } });
+  const reconnectState = a.app.unsignCookie(reconnect.cookies.find(cookie => cookie.name === 'fetch_oauth_state')!.value);
+  assert.equal(reconnectState.value!.split('.')[1], 'alice');
 });
 
 test('combined server approvals block sends, then execute once; Play leaves media available', async t => {

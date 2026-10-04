@@ -84,7 +84,7 @@ export class MediaService {
       } catch (e) {
         if (e instanceof ApiError && e.code === 'job_not_found') throw e;
         // Transient polling/network failures leave the durable prediction available for the next poll.
-        if (e instanceof ApiError && ['provider_timeout', 'rate_limited'].includes(e.code)) return { status: 'pending' };
+        if (e instanceof ApiError && ['provider_timeout', 'provider_unavailable', 'rate_limited'].includes(e.code)) return { status: 'pending' };
         const code = e instanceof ApiError && ['gen_timeout', 'gen_low_quality'].includes(e.code) ? e.code : 'gen_failed';
         this.db.prepare('UPDATE gen_jobs SET status=?,error=? WHERE id=?').run('failed', code, id);
         return { status: 'failed', error: code };

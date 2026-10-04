@@ -60,7 +60,7 @@ export async function buildApp(options: AppOptions = {}) {
     }
   };
   try {
-  await app.register(cors, { origin: config.origins, credentials: true, exposedHeaders: ['Content-Range', 'Accept-Ranges', 'X-Fetch-Mock-Gen', 'X-Fetch-Mock-Voice'] });
+  await app.register(cors, { origin: config.origins, credentials: true, methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'], exposedHeaders: ['Content-Range', 'Accept-Ranges', 'X-Fetch-Mock-Gen', 'X-Fetch-Mock-Voice'] });
   await app.register(rateLimit, { max: 120, timeWindow: '1 minute', errorResponseBuilder: () => new ApiError(429, 'rate_limited', 'Please try again shortly') });
   await app.register(multipart, { limits: { fileSize: 16 * 1024 * 1024, files: 4, fields: 1, fieldSize: 16 * 1024, parts: 5 }, throwFileSizeLimit: true });
   app.addHook('onRequest', async req => {

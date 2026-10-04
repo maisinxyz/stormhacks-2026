@@ -1,10 +1,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import { buildApp, type AppOptions, type RequireUser } from './app.js';
 import { registerB1, type B1Options } from './agent/plugin.js';
 import { isDevSecret, loadConfig } from './agent/config.js';
-import { requireUser } from './auth/requireUser.js';
+import { requireUser, USER_COOKIE } from './auth/requireUser.js';
 import { ApiError } from './errors.js';
 
 export interface FetchAppOptions extends Omit<AppOptions, 'requireUser' | 'registerB1'> {
@@ -33,6 +34,16 @@ export async function buildFetchApp(options: FetchAppOptions = {}) {
       await app.register(async scoped => {
         // B1's background run inherits the authenticated request's async context.
         scoped.addHook('onRoute', route => {
+          if (config.requireLogin && route.method === 'GET' && route.url === '/auth/google/start') {
+            // OAuth is the login entry point. A pending identity authorizes only the
+            // signed OAuth-state cookie; B1 creates the session after a valid callback.
+            route.preHandler = async req => {
+              const raw = req.cookies?.[USER_COOKIE];
+              const signed = raw ? req.unsignCookie(raw) : undefined;
+              const existing = signed?.valid && signed.value ? await b1!.ctx.store.getUser(signed.value) : undefined;
+              req.user = existing ?? { id: randomUUID(), name: 'Pending User', createdAt: new Date().toISOString() };
+            };
+          }
           const handler = route.handler;
           route.handler = async function(req, reply) {
             if (!req.user) return handler.call(this, req, reply);

@@ -28,6 +28,8 @@ await app.listen({ host: context.config.HOST, port: context.config.PORT });
 
 The integration wrapper registers B1's signed-cookie parser at the parent scope, uses B1's `requireUser` for media requests, and checks pet ownership before an agent run. Background agent tasks inherit a per-user async context, so B1-generated props are cached for the correct user. B1's implementation files are unchanged.
 
+With login required, `/auth/google/start` can create a pending identity for signed OAuth state without granting a session or media access. Existing authenticated users retain their identity when reconnecting. B1 validates the callback and creates the actual session.
+
 `context.pets.get(petId)` implements PRD `PetsRepo.get`: `{id,name,species,personality}`. This remains a trusted internal lookup; the combined wrapper checks ownership using `context.pets.getBundle(petId, userId)`.
 
 `context.forUser(userId).media.generateProp(prompt)` implements B1's `media.generateProp(prompt)` with a user-scoped cache. `context.db` provides SQLite prepared statements and migrations. `src/db/index.ts` exports `transaction(db, fn)` for synchronous transactions; future B1 SQLite migrations can use `schema_migrations` versions >=100. B1 currently defaults to `MemoryStore`; its users, modes, tokens, runs, and SSE events do not survive restart. B1's supplied `schema.sql` uses PostgreSQL syntax and cannot be executed directly against this SQLite database. Supply a B1Store adapter to add persistent agent storage. B2 pets, jobs, and media already persist.
@@ -84,4 +86,6 @@ Mock generation converts F1's existing dog/bird `.splat` assets to Gaussian PLY.
 
 `infra/compose.yaml` and `infra/Dockerfile` package the service; no deployment was performed. Use a persistent Node/container host with TLS and a mounted data volume. A single service can also serve the built web app later, once F1/F2 agree on which web entry point ships. Set `HOST=0.0.0.0`, HTTPS `PUBLIC_URL`, exact `WEB_ORIGINS`, stable signing secret, and B1 auth integration.
 
-The current SQLite/local-disk design assumes one server replica. Vercel frontend hosting is possible later, but the backend needs durable external database/storage and job coordination before moving to ephemeral functions. CI checks live in `.github/workflows/b2-server.yml` and only check B2.
+The current SQLite/local-disk design assumes one server replica. Vercel frontend hosting is possible later, but the backend needs durable external database/storage and job coordination before moving to ephemeral functions. CI checks live in `.github/workflows/b2-server.yml` and run server tests, typechecking, compiled smoke checks, and a Docker image build.
+
+See [the B2 commit audit](../../docs/B2-AUDIT.md) for verified behavior, fixes, and remaining PRD/integration gaps. Passing mock backend tests does not establish a complete real-service Desk demo.

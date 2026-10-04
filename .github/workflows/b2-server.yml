@@ -1,9 +1,9 @@
 name: B2 server
 on:
   push:
-    paths: ['apps/server/**', 'apps/web/public/bundles/**', 'apps/web/src/engine/pipeline/**', 'packages/contracts/**', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'infra/**', '.github/workflows/b2-server.yml']
+    paths: ['apps/server/**', 'apps/web/public/bundles/**', 'apps/web/src/engine/pipeline/**', 'packages/contracts/**', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.dockerignore', 'infra/**', '.github/workflows/b2-server.yml']
   pull_request:
-    paths: ['apps/server/**', 'apps/web/public/bundles/**', 'apps/web/src/engine/pipeline/**', 'packages/contracts/**', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'infra/**', '.github/workflows/b2-server.yml']
+    paths: ['apps/server/**', 'apps/web/public/bundles/**', 'apps/web/src/engine/pipeline/**', 'packages/contracts/**', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.dockerignore', 'infra/**', '.github/workflows/b2-server.yml']
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -22,3 +22,4 @@ jobs:
       - run: pnpm --filter @fetch/server test
       - run: pnpm --filter @fetch/server build
       - run: pnpm --filter @fetch/server test:smoke
+      - run: docker build --tag fetch-server:b2 --file infra/Dockerfile .
