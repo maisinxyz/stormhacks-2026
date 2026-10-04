@@ -65,14 +65,19 @@ export function CreatePetFlow({ engine, serverStatus, onCreated, onFinished, onC
   const [seen, setSeen] = useState<string[]>([])
   const [failure, setFailure] = useState<{ code: string; retryAfter?: number } | null>(null)
   const [flat, setFlat] = useState<{ pet: PetBundle; code?: string } | null>(null)
+  const [samplePending, setSamplePending] = useState(false)
   const [startedAt, setStartedAt] = useState(0)
   const [now, setNow] = useState(0)
   const running = useRef(false)
+  const sampleTimer = useRef<number | null>(null)
 
   const image = images[source] ?? null
   const petName = name.trim() || SPECIES.find((s) => s.id === species)!.defaultName
   const preview = useMemo(() => (image ? URL.createObjectURL(image) : ''), [image])
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview)
+    if (sampleTimer.current) window.clearTimeout(sampleTimer.current)
+  }, [preview])
   useEffect(() => { if (step !== 'generating') return; const t = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(t) }, [step])
 
   const handleImagePicked = async (blob: Blob) => {
@@ -93,6 +98,7 @@ export function CreatePetFlow({ engine, serverStatus, onCreated, onFinished, onC
   }
 
   const loadKnownSample = async (k: KnownDog) => {
+    if (sampleTimer.current) window.clearTimeout(sampleTimer.current)
     try {
       const res = await fetch(k.photo)
       const blob = await res.blob()
@@ -100,21 +106,35 @@ export function CreatePetFlow({ engine, serverStatus, onCreated, onFinished, onC
       setSpecies(k.species)
       setName(k.name)
       setMatched(k)
+      setSamplePending(true)
+      sampleTimer.current = window.setTimeout(() => {
+        setSamplePending(false)
+        void run(undefined, { image: blob, species: k.species, name: k.name })
+      }, 700)
     } catch {
       const blob = await createSamplePhoto(k.species)
       await handleImagePicked(blob)
       setSpecies(k.species)
       setName(k.name)
+      setMatched(null)
+      setSamplePending(true)
+      sampleTimer.current = window.setTimeout(() => {
+        setSamplePending(false)
+        void run(undefined, { image: blob, species: k.species, name: k.name })
+      }, 700)
     }
   }
 
-  const run = async (replaces?: string) => {
-    if (!image || running.current) return
+  const run = async (replaces?: string, override: { image?: Blob; species?: Species; name?: string } = {}) => {
+    const sourceImage = override.image ?? image
+    const sourceSpecies = override.species ?? species
+    const sourceName = override.name ?? petName
+    if (!sourceImage || running.current) return
     running.current = true
     setStep('generating'); setFailure(null); setSeen([]); setProgress({ stage: 'upload', pct: 0 }); setStartedAt(Date.now()); setNow(Date.now())
     let fellBack: string | undefined
     try {
-      const generated = await engine.generatePet({ kind: 'photo', image, species, name: petName }, (p) => {
+      const generated = await engine.generatePet({ kind: 'photo', image: sourceImage, species: sourceSpecies, name: sourceName }, (p) => {
         if (p.stage === 'fallback') fellBack = p.detail ?? 'gen_failed'
         setProgress(p)
         setSeen((list) => (list.includes(p.stage) ? list : [...list, p.stage]))
@@ -157,24 +177,21 @@ export function CreatePetFlow({ engine, serverStatus, onCreated, onFinished, onC
       {source === 'upload' && (image ? <Picked url={preview} onReset={() => { setImages({ ...images, upload: null }); setMatched(null) }} /> : <UploadZone onPick={handleImagePicked} />)}
       {source === 'camera' && (image ? <Picked url={preview} onReset={() => { setImages({ ...images, camera: null }); setMatched(null) }} label="Retake" /> : <CameraCapture onCapture={handleImagePicked} />)}
 
-      {matched && <div className="cp-banner" style={{ background: '#f0f8db', borderColor: '#bed67c', color: '#445b20', marginTop: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <Sparkles size={15}/><span>Recognised <strong>{matched.name}</strong> ({matched.species === 'dog' ? 'Dog' : 'Cat'}) from photo</span>
-      </div>}
-
       <div style={{ margin: '14px 0 10px' }}>
         <div style={{ fontSize: '11px', color: '#748380', marginBottom: '7px', fontWeight: 600 }}>Or choose a sample pet:</div>
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {KNOWN_DOGS.slice(0, 6).map((k) => (
-            <button key={k.id} type="button" className="text-button" style={{ fontSize: '0.8rem', padding: '4px 9px', borderRadius: '6px', background: '#f0f3eb', border: '1px solid #dce2d8', color: '#384d46', cursor: 'pointer' }} onClick={() => void loadKnownSample(k)}>
+            <button key={k.id} type="button" disabled={samplePending} className="text-button" style={{ fontSize: '0.8rem', padding: '4px 9px', borderRadius: '6px', background: '#f0f3eb', border: '1px solid #dce2d8', color: '#384d46', cursor: samplePending ? 'wait' : 'pointer' }} onClick={() => void loadKnownSample(k)}>
               {k.species === 'dog' ? '🐶' : '🐱'} {k.name} ({k.species})
             </button>
           ))}
         </div>
+        {samplePending && <div className="cp-sample-loading" role="status">Preparing the 3D companion…</div>}
       </div>
 
       <div className="name-field"><label htmlFor="pet-name">What should we call them?</label><input id="pet-name" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder={`e.g. ${matched?.name || SPECIES.find((s) => s.id === species)!.defaultName}`} /></div>
       {offline && <p className="cp-banner" role="status">The Fetch server is offline. Start it with "pnpm dev" in apps/server to create pets.</p>}
-      <div className="modal-actions"><button className="text-button" onClick={() => setStep('species')}>Back</button><button type="button" className="text-button" onClick={onClose} style={{ marginLeft: 'auto', marginRight: '8px' }}>Explore Desk</button><button className="primary-button compact" disabled={!image || offline} onClick={() => void run()}>Create {petName} <Sparkles size={16} /></button></div>
+      <div className="modal-actions"><button className="text-button" onClick={() => setStep('species')}>Back</button><button type="button" className="text-button" onClick={onClose} style={{ marginLeft: 'auto', marginRight: '8px' }}>Explore Desk</button><button className="primary-button compact" disabled={!image || offline || samplePending} onClick={() => void run()}>Create {petName} <Sparkles size={16} /></button></div>
     </>}
 
     {step === 'generating' && <Generating preview={preview} name={petName} species={species} progress={progress} seen={seen} elapsed={Math.max(0, Math.round((now - startedAt) / 1000))} />}

@@ -27,6 +27,7 @@
 .cp-draw-canvas { width: 100%; aspect-ratio: 640 / 400; border-radius: 10px; border: 1px dashed #cbd7cc; background: white; touch-action: none; cursor: crosshair; }
 .cp-draw small { color: #8c9b8f; font: 10px 'DM Mono', monospace; }
 .cp-banner { margin: 14px 0 0; padding: 10px 12px; border-radius: 8px; background: #fff6cb; border: 1px solid #eee1a6; color: #6f6022; font-size: 12px; }
+.cp-sample-loading { margin-top: 8px; color: #657855; font-size: 11px; animation: cp-pulse 1.2s ease-in-out infinite; }
 .primary-button:disabled { opacity: .45; cursor: not-allowed; }
 .cp-thumb { width: 112px; height: 112px; flex-shrink: 0; border-radius: 16px; object-fit: cover; background: #eef2e8; border: 1px solid #dce3de; }
 .cp-gen { padding: 6px 0 4px; }
