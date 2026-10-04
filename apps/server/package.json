@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
+    "@composio/core": "^0.22.0",
     "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.0.0",
     "@fastify/multipart": "^9.0.0",
