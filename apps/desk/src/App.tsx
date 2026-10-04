@@ -86,11 +86,11 @@ function App() {
 
   const runLocalCommand = (text: string): LocalIntent | 'mode:work' | 'mode:play' | 'feed' | null => {
     const normalized = text.toLowerCase().trim()
-    const matches: [string, LocalIntent][] = [['roll over', 'roll_over'], ['play dead', 'play_dead'], ['fetch the ball', 'fetch_ball'], ['get the ball', 'fetch_ball'], ['wake up', 'wake'], ['sit', 'sit'], ['stay', 'stay'], ['come', 'come'], ['speak', 'speak'], ['spin', 'spin'], ['shake', 'shake'], ['dance', 'dance'], ['hide', 'hide'], ['sleep', 'sleep'], ['stop', 'stop']]
+    const matches: [RegExp, LocalIntent][] = [[/roll(?: over)?/i, 'roll_over'], [/play dead/i, 'play_dead'], [/\bfetch\b|\bget\b.*\bball\b|\bchase\b.*\bball\b/i, 'fetch_ball'], [/wake up/i, 'wake'], [/\bsit(?: down)?\b/i, 'sit'], [/\bstay\b/i, 'stay'], [/\bcome(?: here)?\b/i, 'come'], [/\bspeak|\b(bark|woof)/i, 'speak'], [/\bspin|\btwirl/i, 'spin'], [/\bshake|\bpaw/i, 'shake'], [/\bdance/i, 'dance'], [/\bhide/i, 'hide'], [/\bsleep|\bnap/i, 'sleep'], [/\bstop|\bheel/i, 'stop']]
     if (normalized.includes('work mode')) return 'mode:work'
     if (normalized.includes('play time') || normalized.includes('play mode')) return 'mode:play'
     if (['treat', 'feed you', 'dinner'].some((phrase) => normalized.includes(phrase))) return 'feed'
-    return matches.find(([phrase]) => normalized === phrase || normalized.includes(phrase))?.[1] ?? null
+    return matches.find(([phrase]) => phrase.test(normalized))?.[1] ?? null
   }
 
   const speak = (text: string) => {
@@ -98,19 +98,28 @@ function App() {
     if (!appState.settings.voiceEnabled) return
     stopListening()
     setSpeaking(true)
-    speakWithBrowserTts(text, (amplitude) => engine.setSpeaking(amplitude), () => setSpeaking(false))
+    speakWithBrowserTts(text, (amplitude) => engine.setSpeaking(amplitude), () => setSpeaking(false), appState.settings.volume / 100)
   }
 
   const handleCommand = (text: string) => {
-    if (!hasPet) { setToast('Create a pet first'); setShowCreate(true); return }
     const local = runLocalCommand(text)
     if (local === 'mode:work' || local === 'mode:play') { setDeskMode(local === 'mode:work' ? 'work' : 'play'); return }
     if (local === 'feed') {
-      if (mode !== 'play') { setToast('Treats and toys are in Play mode'); return }
-      feedPet()
+      if (hasPet && mode !== 'play') { setToast('Treats and toys are in Play mode'); return }
+      if (hasPet) feedPet()
+      else { engine.doIntent('trick'); setPetReaction(value => value + 1); speak('A treat? That sounds lovely.'); }
       return
     }
-    if (local) { engine.doIntent(local); setToast(`${pet?.name ?? 'Your pet'} will ${local.replace('_', ' ')}`); return }
+    if (local) {
+      engine.doIntent(local); setPetReaction(value => value + 1)
+      const response = `${local === 'fetch_ball' ? 'I will fetch the ball!' : local === 'roll_over' ? 'Rolling over!' : local === 'play_dead' ? 'Playing dead!' : local === 'wake' ? 'I am awake!' : `Okay, I will ${local.replace('_', ' ')}!`}`
+      setPetLine(response); speak(response); setToast(`${pet?.name ?? 'Your friend'} will ${local.replace('_', ' ')}`); return
+    }
+    if (!hasPet) {
+      engine.doIntent('trick'); setPetReaction(value => value + 1)
+      const response = `I heard you say, “${text.trim()}.” Tell me to sit, dance, fetch, or speak!`
+      setPetLine(response); speak(response); return
+    }
     if (mode === 'play') { speak('It is playtime. Ask me to chase, fetch, or dance.'); setToast('Play mode keeps work errands tucked away'); return }
     void runAgent(text)
   }
@@ -185,13 +194,18 @@ function App() {
       <section className="desk-canvas" aria-label="Fetch Desk workspace">
         <div className="desk-heading"><div className="hero-copy"><Reveal delay={.08}><span className="eyebrow"><Sun size={18}/>Good to see you<span className="greeting-line"/></span></Reveal><h1 aria-label="What should we fetch?"><motion.span aria-hidden="true" initial={calm ? false : { opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .36, delay: .16 }}>What should we <em>fetch?</em></motion.span></h1><Reveal delay={.28}><p>Your day, a little lighter. Your companion, right here.</p></Reveal></div><div className="mode-switch" role="group" aria-label="Mode"><motion.span className="mode-pill" animate={{ x: mode === 'work' ? 0 : '100%' }} transition={{ type: 'spring', duration: .36, bounce: .12 }}/><button aria-pressed={mode === 'work'} className={mode === 'work' ? 'selected' : ''} onClick={e => { e.stopPropagation(); setDeskMode('work') }}><span className="mode-work-dot"/>Work</button><button aria-pressed={mode === 'play'} className={mode === 'play' ? 'selected play-selected' : ''} onClick={e => { e.stopPropagation(); openPlay() }} disabled={!hasPet} title={!hasPet ? 'Create a pet to unlock Play mode' : undefined}><Sparkles size={15}/>Play</button></div></div>
         {mode === 'play' && <div className="connectors-banner"><Sparkles size={16}/><span><strong>Play mode</strong> · Gmail, Drive, and Calendar are taking a nap.</span><button onClick={() => setDeskMode('work')}>Return to Work</button></div>}
-        <Reveal delay={.38}><div className={`command-bar ${listening ? 'listening' : ''} ${speaking ? 'speaking' : ''} ${!hasPet ? 'command-bar--gated' : ''}`} onClick={e => e.stopPropagation()}><span className="command-focus-ring" aria-hidden="true"/><button className="command-icon mic-button" onClick={listening ? stopListening : startListening} aria-label={listening ? 'Stop listening' : 'Start listening'} disabled={!hasPet}><Mic size={23}/></button><input ref={commandInput} id="command-input" value={command} onChange={e => setCommand(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendCommand()} placeholder={!hasPet ? 'Create a pet to get started\u2026' : listening ? 'All ears. What\u2019s on your mind?' : mode === 'work' ? `Ask ${pet?.name ?? 'your pet'} to find, read, or organise something\u2026` : `Tell ${pet?.name ?? 'your pet'} what to play\u2026`} aria-label={`Command ${pet?.name ?? 'your pet'}`} disabled={!hasPet}/><Waveform active={speaking || listening}/><span className="command-hint">{listening ? 'Listening\u2026' : <>Hold <kbd>Space</kbd> to talk</>}</span><MagneticButton className="command-submit" onClick={sendCommand} aria-label="Send command" disabled={!hasPet}><Send size={21}/></MagneticButton></div></Reveal>
+        <Reveal delay={.38}><div className={`command-bar ${listening ? 'listening' : ''} ${speaking ? 'speaking' : ''}`} onClick={e => e.stopPropagation()}><span className="command-focus-ring" aria-hidden="true"/><button className="command-icon mic-button" onClick={listening ? stopListening : startListening} aria-label={listening ? 'Stop listening' : 'Start listening'}><Mic size={23}/></button><input ref={commandInput} id="command-input" value={command} onChange={e => setCommand(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendCommand()} placeholder={!hasPet ? 'Try “sit”, “dance”, or send your pet a message…' : listening ? 'All ears. What\u2019s on your mind?' : mode === 'work' ? `Ask ${pet?.name ?? 'your pet'} to find, read, or organise something\u2026` : `Tell ${pet?.name ?? 'your pet'} what to play\u2026`} aria-label={`Message ${pet?.name ?? 'your friend'}`}/><Waveform active={speaking || listening}/><span className="command-hint">{listening ? 'Listening\u2026' : <>Hold <kbd>Space</kbd> to talk</>}</span><MagneticButton className="command-submit" onClick={sendCommand} aria-label="Send message"><Send size={21}/></MagneticButton></div></Reveal>
         {hasPet && <Reveal delay={.44}><div className="quick-prompts"><span>A little nudge</span>{['Make me a to-do list', 'What\u2019s on my calendar?', 'Email the standup notes'].map(text => <button key={text} onClick={() => chooseSuggestion(text)}>{text}<span aria-hidden="true">↗</span></button>)}</div></Reveal>}
         {!hasPet && <Reveal delay={.44}><div className="first-run-cta"><div className="first-run-copy"><span className="eyebrow"><Sparkles size={16}/>No pet yet</span><h2>Create your first companion.</h2><p>Take a photo or upload an image of a dog or cat. It becomes a 3D pet that lives on your desk, helps with work, and joins you in play.</p></div><div className="first-run-inputs"><button className="first-run-input-btn" onClick={() => setShowCreate(true)}><span className="first-run-icon"><FileText size={28}/></span><strong>Upload an image</strong><small>JPG, PNG or WebP</small></button><button className="first-run-input-btn" onClick={() => setShowCreate(true)}><span className="first-run-icon camera-icon"><Camera size={28}/></span><strong>Take a photo</strong><small>Uses your camera</small></button></div><button className="primary-cta-button" onClick={() => setShowCreate(true)}><Sparkles size={18}/> Create your pet</button></div></Reveal>}
         <div className="canvas-world"><AmbientWorld/><div className="world-label"><span className="status-dot"/>Your Desk<span className="world-label-rule"/><span>Room to do good things.</span></div>
           <canvas ref={mainCanvas} className="desk-engine-canvas" aria-hidden="true"/>
           {hasPet && <Companion name={pet?.name ?? ''} species={pet?.species ?? 'dog'} line={mode === 'play' ? 'Time for some fun!' : petLine} subtitles={appState.settings.subtitles} reaction={petReaction} speaking={speaking} canvas={mainCanvas} status={engine.getStatus()}/>}
-          {!hasPet && <div className="pet-stage pet-stage--empty" aria-hidden="true"><div className="pet-orbit"><span/><Sparkles size={19}/><span/></div><div className="pet-placeholder pet-placeholder--symbol"><div className="empty-symbol-disc"><PawPrint size={54} className="empty-paw-icon"/><div className="empty-sparkle-orbit"><span className="sparkle-dot dot-1">✦</span><span className="sparkle-dot dot-2">✧</span></div></div></div><div className="pet-nameplate pet-nameplate--empty"><span className="status-dot" style={{ background: '#b0bdc6' }}/><strong>Waiting for a friend</strong></div></div>}
+          {!hasPet && <div className="pet-stage pet-stage--empty" aria-label="Your future companion">
+            <div className="pet-orbit" aria-hidden="true"><span/><Sparkles size={19}/><span/></div>
+            {petReaction > 0 && <div className="pet-bubble empty-pet-bubble" role="status">{petLine}</div>}
+            <div className="pet-placeholder pet-placeholder--symbol"><motion.div key={petReaction} className="empty-symbol-disc" animate={petReaction ? { scale: [1, 1.1, 1], rotate: [0, -7, 7, 0] } : {}} transition={{ duration: .55 }}><PawPrint size={54} className="empty-paw-icon"/><div className="empty-sparkle-orbit"><span className="sparkle-dot dot-1">{'\u2726'}</span><span className="sparkle-dot dot-2">{'\u2727'}</span></div></motion.div></div>
+            <div className="pet-nameplate pet-nameplate--empty" aria-live="polite"><span className="status-dot" style={{ background: '#b0bdc6' }}/><strong>Waiting for a friend</strong><span>&middot;</span><span>{engine.getStatus()}</span></div>
+          </div>}
           <div className="habitat-caption" aria-hidden="true"><span>small companion,</span><span>big possibilities.</span><svg viewBox="0 0 80 35"><path d="M4 8q36 36 66 1m-12 0 12-1-1 12" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg></div>
           <button className="peek-dock" onClick={e => { e.stopPropagation(); setShowRunLog(true) }}><div className="peek-header"><span><span className="peek-live"/>Peek</span><span className="peek-open-label">Open log ↗</span></div><canvas ref={peekCanvas}/><PeekScene run={appState.runs[0]} petName={pet?.name} species={pet?.species ?? 'dog'} hasPet={hasPet}/></button><div className="world-coordinate" aria-hidden="true"><PawPrint size={12}/>A good place to land.</div>
         </div>

@@ -270,7 +270,7 @@ kbd { font: 700 10px var(--font-text); color: #485c46; padding: 4px 6px; border-
 .reduce-motion .desk-window:hover .window-paper, .reduce-motion .desk-window.dragging .window-paper { transform: none; }
 .sidebar { display: flex; }
 .desk-footer .wake-button { position: relative; inset: auto; margin-left: auto; box-shadow: 0 3px 0 #94a76733; }
-.habitat-caption { top: 512px; left: 46%; }
+.habitat-caption { top: 570px; left: 46%; }
 .help-content { padding: 25px 4px; font-size: 14px; line-height: 1.65; }
 .help-content .mascot { width: 100px; height: 110px; }
 .help-content h2 { font: 27px var(--font-display); }
@@ -345,5 +345,6 @@ kbd { font: 700 10px var(--font-text); color: #485c46; padding: 4px 6px; border-
 .notification-list { display: grid; gap: 10px; }
 .notification-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .notification-item.unread { padding-left: 8px; border-left: 3px solid var(--focus); }
-.command-bar--gated { opacity: .72; }
 
+
+.empty-pet-bubble { top: -27px; max-width: 260px; }
