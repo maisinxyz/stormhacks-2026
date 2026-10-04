@@ -6,6 +6,7 @@
     "dev:web": "pnpm --filter @fetch/web dev",
     "dev:desk": "pnpm --filter @fetch/desk dev",
     "typecheck": "pnpm -r typecheck",
-    "gen:bundles": "pnpm --filter @fetch/web gen:bundles"
+    "gen:bundles": "pnpm --filter @fetch/web gen:bundles",
+    "dev:overlay": "pnpm --filter @fetch/overlay dev"
   }
 }

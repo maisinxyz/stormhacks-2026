@@ -1,0 +1,17 @@
+{
+  "name": "@fetch/overlay",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Desktop overlay: the Fetch pet lives on top of your screen (Electron shell around apps/web/overlay.html).",
+  "main": "src/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "start": "node scripts/dev.mjs --no-web",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "electron": "^44.5.1",
+    "typescript": "^5.9.3"
+  }
+}
