@@ -46,15 +46,52 @@ const form = (o: Record<string, Blob | string>) => {
 
 const isQuota = (err: unknown): err is GenError => err instanceof GenError && err.code === 'gen_quota';
 
+/**
+ * The bundled pets are already modelled, but the creation experience should
+ * still feel like an image-to-3D job. Pace the same visible stages the server
+ * path reports so a sample dog does not pop into existence before the user can
+ * see what Fetch is doing.
+ */
+async function stageBundledPet(onProgress: (stage: string, pct: number) => void, species: Species) {
+  const stages: Array<[string, number, number]> = species === 'dog'
+    ? [
+      ['upload', 0.04, 400],
+      ['pose', 0.14, 700],
+      ['segment', 0.25, 750],
+      ['3d', 0.38, 900],
+      ['3d', 0.56, 1150],
+      ['3d', 0.72, 1100],
+      ['rig', 0.86, 750],
+      ['save', 1, 450],
+    ]
+    : [
+      ['upload', 0.04, 300],
+      ['pose', 0.14, 550],
+      ['segment', 0.25, 650],
+      ['3d', 0.42, 800],
+      ['3d', 0.66, 950],
+      ['rig', 0.86, 650],
+      ['save', 1, 400],
+    ];
+  for (const [stage, pct, wait] of stages) {
+    onProgress(stage, pct);
+    await new Promise<void>(resolve => setTimeout(resolve, wait));
+  }
+}
+
 export async function generatePet(api: string, input: GenInput, onProgress: Progress, budget = MAIN_BUDGET): Promise<PetBundle> {
   const p = (stage: string, pct: number, detail?: string) => onProgress(detail ? { stage, pct, detail } : { stage, pct });
   const post = (path: string, body: BodyInit, headers?: HeadersInit) => fetch(api + path, { method: 'POST', body, headers, credentials: 'include' });
   const postJson = (path: string, body: unknown) => post(path, JSON.stringify(body), { 'content-type': 'application/json' });
 
-  // A photo we already modelled by hand: return that dog at once, no server or GPU quota.
+  // A photo we already modelled by hand: use the bundled result without server
+  // or GPU quota, while pacing its visible stages like a real model job.
   // ponytail: the bundle lives in this browser session only (not POSTed to /pets); save it server-side if it must survive a reload.
   const known = await knownDog(input.image);
-  if (known) { p('save', 1); return knownBundle(known, input.name || known.name); }
+  if (known) {
+    await stageBundledPet(p, known.species);
+    return knownBundle(known, input.name || known.name);
+  }
 
   p('upload', 0.02);
   const uploaded = (await json<{ imageId: string }>(await post('/uploads', form({ image: input.image })))).imageId;
