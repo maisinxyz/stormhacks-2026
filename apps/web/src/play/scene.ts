@@ -3,7 +3,7 @@ import * as THREE from 'three';
 export const ROOM_SPEC = {
   scale: 1,
   room: { width: 11, depth: 8, height: 2.6, wall: 0.14, floor: 0.12 },
-  clearance: { wallGap: 0.03, walk: 0.9, doorSwing: 0.8, cribAccess: 0.65 },
+  clearance: { wallGap: 0.03, walk: 0.9, doorSwing: 0.8, cribAccess: 0.65, cameraWall: 0.5, cameraFloor: 0.45, cameraCeiling: 0.65 },
   palette: {
     wall: 0xbdb4a8, floor: 0xc9c6c1, trim: 0x82796f, metal: 0x1a1a1a,
     oatmeal: 0xd6cbb9, cream: 0xe8e1d5, taupe: 0xa89a89, paleGray: 0xd0d0cd,
@@ -274,7 +274,8 @@ export function createRoomScene(_low = false): RoomScene {
   const floorMaterial = new THREE.MeshStandardMaterial({ map: plankTexture(), roughness: MAT.floorRoughness, metalness: 0 });
   box(scene, 'room-floor', [R.width, R.floor, R.depth], [0, -R.floor / 2, 0], floorMaterial);
   const wallMaterial = roomMaterial(P.wall, MAT.wallRoughness);
-  const ceilingMaterial = roomMaterial(P.wall, MAT.wallRoughness);
+  // The ceiling remains part of the house shell, but does not occlude an interior orbit view.
+  const ceilingMaterial = new THREE.MeshStandardMaterial({ color: P.wall, roughness: MAT.wallRoughness, side: THREE.BackSide });
   const window = ROOM_SPEC.window;
   const backSideWidth = (R.width - window.width) / 2;
   const upperWallHeight = R.height - window.sill - window.height;
