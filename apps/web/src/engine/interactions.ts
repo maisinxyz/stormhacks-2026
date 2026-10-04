@@ -89,7 +89,7 @@ export class Interactions {
     if (Math.abs(dx) > 3) { const s = Math.sign(dx); if (this.dirX && s !== this.dirX) this.revs.push(e.timeStamp); this.dirX = s; }
     this.revs = this.revs.filter(t => e.timeStamp - t < 1000);
     this.last = { x: e.clientX, y: e.clientY, t: e.timeStamp };
-    if (d.ball && w) { this.h.holdBall(w.x, w.y); this.flick.push({ x: e.clientX, y: e.clientY, t: e.timeStamp }); this.flick = this.flick.filter(f => e.timeStamp - f.t < 100); }
+    if (d.ball && w) { this.h.holdBall(w.x, Math.abs(w.z) > 1e-5 ? w.z : w.y); this.flick.push({ x: e.clientX, y: e.clientY, t: e.timeStamp }); this.flick = this.flick.filter(f => e.timeStamp - f.t < 100); }
     if (d.onPet) { this.strokeT = 0; if (d.path > 12 && w) this.h.dragPet?.(w.x, Math.abs(w.z) > 1e-5 ? w.z : w.y, false); }
   };
 

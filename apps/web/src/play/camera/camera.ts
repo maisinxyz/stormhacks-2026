@@ -44,8 +44,9 @@ export class CameraView implements PlayView {
   private live = false;
   /** Pinch multiplier on AR_PET_SCALE. (session.scale is the Room's pet size in the shared shell, not ours.) */
   private zoom = 1;
-  /** "Follow": the dog walks to stay in front of the user as they turn. Any other command ends it. */
+  /** "Follow": the dog walks toward the cursor while this mode is active. */
   private following = false;
+  private cursorTarget?: THREE.Vector3;
   /** Which side of the shot the dog stands on (+1 right, -1 left). Remembered for the session. */
   private side: 1 | -1 = (() => { try { return sessionStorage.getItem('fetch.play.side') === '-1' ? -1 : 1; } catch { return 1; } })();
   private entered = false;
@@ -84,7 +85,7 @@ export class CameraView implements PlayView {
         flip: () => void this.stream.flip().catch(err => this.fail(err)),
         recenter: () => this.recenter(),
         treat: () => { if (e.feed()) this.alive.focus(2); },
-        ball: () => e.doIntent('fetch_ball'),
+        ball: () => e.spawnBallAtScreen(),
         command: i => { this.following = false; this.alive.focus(2.5); e.doIntent(i); },
         follow: () => this.follow(),
         swap: () => this.swapSide(),
@@ -203,6 +204,7 @@ export class CameraView implements PlayView {
     this.stream.video.remove();
     this.ui.el.remove();
     this.live = this.entered = this.following = false;
+    this.cursorTarget = undefined;
     this.pending = undefined;
   }
 
@@ -275,10 +277,15 @@ export class CameraView implements PlayView {
 
   private recenter() {
     this.following = false;
+    this.cursorTarget = undefined;
     if (this.xr.active) { const g = this.inViewGround(); if (g) this.ctx.engine.placePet(g.x, g.z, false); }
-    else { this.pose.recenter(); this.placeSide(true); } // dog back to its spot at the side of the view
+    else {
+      this.pose.recenter();
+      const g = this.inViewGround();
+      if (g) this.ctx.engine.placePet(g.x, g.z, true);
+    }
     this.alive.focus(2);
-    this.ui.toast('Recentered.');
+    this.ui.toast('Dog centered.');
   }
 
   // ---------- voice (B.7): push-to-talk -> local intents ----------
@@ -340,6 +347,10 @@ export class CameraView implements PlayView {
   };
 
   private onMove = (e: PointerEvent) => {
+    if (this.following && !this.petPtr && !this.pinch && !(e.target as HTMLElement | null)?.closest?.('[data-ui]')) {
+      const g = this.groundAt(e.clientX, e.clientY);
+      if (g) { this.cursorTarget = g.clone(); this.ctx.engine.placePet(g.x, g.z, true); }
+    }
     const pp = this.petPtr;
     if (pp && pp.id === e.pointerId) {
       if (!pp.carrying && Math.hypot(e.clientX - pp.x0, e.clientY - pp.y0) > CARRY_PX) pp.carrying = true;
@@ -381,7 +392,12 @@ export class CameraView implements PlayView {
 
   /** Floor point under a screen position, clamped to a sane distance from the user's feet. */
   private groundAt(px: number, py: number): THREE.Vector3 | undefined {
-    const e = this.ctx.engine, g = e.groundPoint(px, py);
+    // Reserve a generous edge margin for the dog's full footprint. This also
+    // clamps Follow targets, so pointer movement cannot send the dog off-screen.
+    const marginX = Math.max(64, innerWidth * .14);
+    const safeX = THREE.MathUtils.clamp(px, marginX, innerWidth - marginX);
+    const safeY = THREE.MathUtils.clamp(py, innerHeight * .58, innerHeight * .86);
+    const e = this.ctx.engine, g = e.groundPoint(safeX, safeY);
     if (!g) return undefined; // above the horizon
     const foot = new THREE.Vector3(e.camera.position.x, g.y, e.camera.position.z); // the user's feet under the camera
     const d = g.clone().sub(foot);
@@ -398,23 +414,14 @@ export class CameraView implements PlayView {
     if (g) this.ctx.engine.placePet(g.x, g.z, true);
   }
 
-  private follow() { this.following = true; this.alive.focus(2.5); this.ui.toast('Following you. Say "stay" to stop.', 2500); }
+  private follow() { this.following = true; this.cursorTarget = undefined; this.alive.focus(2.5); this.ui.toast('Following the cursor. Say "stay" to stop.', 2500); }
 
   /** While following: when the user has turned more than ~14 deg away, walk to the same distance straight ahead of them. */
   private followStep() {
-    const e = this.ctx.engine, cam = e.camera;
-    // Compare against where the dog is heading (if it is already walking), so a longer turn re-aims the walk instead
-    // of finishing a stale one first.
-    const p = e.travelling && this.followTo ? this.followTo : e.petPosition, dx = p.x - cam.position.x, dz = p.z - cam.position.z;
-    const f = cam.getWorldDirection(new THREE.Vector3());
-    const fl = Math.hypot(f.x, f.z), dist = THREE.MathUtils.clamp(Math.hypot(dx, dz), PLACE_MIN, PLACE_MAX);
-    if (fl < 0.2) return; // looking straight up or down: no heading
-    const cos = (dx * f.x + dz * f.z) / (fl * (Math.hypot(dx, dz) || 1));
-    if (cos >= 0.97) return;
-    this.followTo = new THREE.Vector3(cam.position.x + f.x / fl * dist, 0, cam.position.z + f.z / fl * dist);
-    e.placePet(this.followTo.x, this.followTo.z, true);
+    const e = this.ctx.engine;
+    if (this.cursorTarget) { e.placePet(this.cursorTarget.x, this.cursorTarget.z, true); return; }
+    return;
   }
-  private followTo?: THREE.Vector3;
 
   /** A floor point comfortably inside the current view (lower-middle of the screen). */
   private inViewGround() {

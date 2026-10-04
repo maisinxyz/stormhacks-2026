@@ -60,12 +60,7 @@ export class CameraUi {
       btn(this.chips, 'cam-chip', label, label, () => h.command(intent));
     btn(this.chips, 'cam-chip', 'Follow me as I turn', 'Follow', h.follow);
     btn(this.chips, 'cam-chip', 'Stand on the other side of the shot', 'Swap side', h.swap);
-    // upload a dog photo -> plush pet (a hidden file input behind a chip; `capture` is left off so the gallery is offered too)
-    const file = document.createElement('input');
-    file.type = 'file'; file.accept = 'image/*'; file.hidden = true;
-    file.addEventListener('change', () => { const f = file.files?.[0]; file.value = ''; if (f) h.photo(f); });
-    this.chips.appendChild(file);
-    btn(this.chips, 'cam-chip', 'Make the pet from a photo of your dog', 'My dog photo', () => file.click());
+    btn(this.chips, 'cam-chip', 'Take a photo and save it', 'Take a photo', h.capture);
     btn(this.chips, 'cam-chip', 'Give a treat', 'Treat', h.treat);
     btn(this.chips, 'cam-chip', 'Throw the ball', 'Ball', h.ball);
     btn(this.chips, 'cam-chip', 'Recenter the dog in front of you', 'Recenter', h.recenter);
