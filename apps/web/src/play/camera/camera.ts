@@ -26,6 +26,7 @@ const VOICE_ERRORS: Record<string, string> = {
   'audio-capture': 'No microphone found. Use the command buttons under ⋯.',
   network: 'Speech recognition could not reach its service (needs Chrome or Safari, online). Use the command buttons under ⋯.',
   'no-speech': 'Did not hear anything. Hold the mic, speak, then release.',
+  'model-unavailable': 'The voice model could not be downloaded (needs internet once). Use the command buttons under ⋯.',
 };
 const CARRY_PX = 48;                         // a press on the dog that travels this far is a carry, not a stroke
 
@@ -76,7 +77,7 @@ export class CameraView implements PlayView {
       this.alive = new Alive(e);
       this.tint = new AmbientTint(this.stream.video, e);
       this.xr = new XrTier(e, ctx.root, () => this.xrEnded());
-      this.voice = new PushToTalk(t => this.heard(t), code => this.ui.toast(VOICE_ERRORS[code] ?? `Voice error (${code}). Use the command buttons under ⋯.`, 6000));
+      this.voice = new PushToTalk(t => this.heard(t), code => this.ui.toast(VOICE_ERRORS[code] ?? `Voice error (${code}). Use the command buttons under ⋯.`, 6000), text => this.ui.toast(text, 4000));
       this.ui = new CameraUi({
         back: () => ctx.switchTo('room'),
         flip: () => void this.stream.flip().catch(err => this.fail(err)),
@@ -152,6 +153,7 @@ export class CameraView implements PlayView {
       this.ui.toast(orient === 'mouse' ? 'Drag to look around (simulated motion).' : 'No motion sensor here. Drag to look around.');
     } else this.ui.toast('Move your phone. Tap the floor to place your dog.');
     this.ui.coach(); // first run only
+    this.voice.warm();
   }
 
   // ---------- capture (B.9) ----------
@@ -191,7 +193,7 @@ export class CameraView implements PlayView {
     this.pts.clear(); this.pinch = undefined; this.petPtr = undefined;
     if (this.xr.active) this.xr.stop();
     try { screen.orientation?.unlock?.(); } catch { /* was never locked */ }
-    this.voice.abort();
+    this.voice.release(); // mic off
     this.ctx.engine.setListening(false);
     this.ctx.engine.setAutonomous(true); // the Room keeps its own idle life
     this.stream.stop();               // camera light off

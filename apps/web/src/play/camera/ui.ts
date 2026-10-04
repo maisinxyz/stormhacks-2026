@@ -43,7 +43,7 @@ export class CameraUi {
 
     // mic: hold to talk (pointer events so it works for touch and mouse; Space/Enter for keyboard)
     this.mic = btn(this.el, 'cam-btn bl', 'Hold to talk to your dog', '🎤');
-    const down = (e: Event) => { e.preventDefault(); if (e instanceof PointerEvent) this.mic.setPointerCapture(e.pointerId); this.mic.classList.add('on'); h.micDown(); }; // captured: sliding off the button does not cut the recording
+    const down = (e: Event) => { e.preventDefault(); if (e instanceof PointerEvent) try { this.mic.setPointerCapture(e.pointerId); } catch { /* no active pointer (synthetic event) */ } this.mic.classList.add('on'); h.micDown(); }; // captured: sliding off the button does not cut the recording
     const up = () => { if (!this.mic.classList.contains('on')) return; this.mic.classList.remove('on'); h.micUp(); };
     this.mic.addEventListener('pointerdown', down);
     this.mic.addEventListener('pointerup', up); this.mic.addEventListener('pointercancel', up);

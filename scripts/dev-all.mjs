@@ -21,7 +21,7 @@ for (const app of apps) {
     console.log(`${app.name} is already running on http://localhost:${app.port}; reusing it.`)
     continue
   }
-  children.push(spawn(npm, ['run', 'dev'], { cwd: app.cwd, stdio: 'inherit' }))
+  children.push(spawn(npm, ['run', 'dev'], { cwd: app.cwd, stdio: 'inherit', shell: process.platform === 'win32' })) // shell: Node 24 on Windows refuses to spawn .cmd directly (EINVAL)
 }
 
 let shuttingDown = false
