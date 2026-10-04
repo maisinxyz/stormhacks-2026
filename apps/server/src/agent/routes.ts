@@ -7,7 +7,8 @@ import type { B1Context } from './context';
 import type { RunHub } from './hub';
 import { newId, type AgentRunner } from './runner';
 import { streamRun } from './sse';
-import { TOOL_BY_NAME } from './tools';
+import type { ToolContext } from './tools';
+import { ANY_TOOL_BY_NAME, CONNECT_TOOL } from './toolset';
 import { TERMINAL_STATUSES, type Approval, type User } from './types';
 
 /** Sliding-window limit per user (PRD B1.7). */
@@ -91,6 +92,15 @@ export async function agentRoutes(app: FastifyInstance, ctx: B1Context, hub: Run
     if (!hashOk) return reply.code(409).send({ error: 'content_hash_mismatch' });
     if (runner.gate.pendingAction(run.id) !== actionId) return reply.code(409).send({ error: 'run_not_waiting' });
 
+    // A connect card can only be approved once the app really is connected (it also resolves on its own).
+    if (approval.tool === CONNECT_TOOL) {
+      if (edited) return reply.code(400).send({ error: 'edit_not_supported' });
+      const toolkit = String(approval.payload.toolkit);
+      if (!(await ctx.composio?.isConnected(user.id, toolkit).catch(() => false))) {
+        return reply.code(409).send({ error: 'not_connected_yet', message: 'Finish signing in with the link first.' });
+      }
+    }
+
     if (edited) {
       const reissued = await reissueEdited(approval, edited);
       if ('error' in reissued) return reply.code(reissued.error === 'run_not_waiting' ? 409 : 400).send(reissued);
@@ -113,9 +123,15 @@ export async function agentRoutes(app: FastifyInstance, ctx: B1Context, hub: Run
     return { ok: true, status: 'approved' };
   });
 
+  /** Enough context to rebuild an approval preview outside a run (no connecting, no progress). */
+  const approvalContext = (userId: string): ToolContext => ({
+    connectors: undefined as never, composio: ctx.composio, userId,
+    progress: () => {}, awaitConnection: async () => { throw new Error('cannot connect apps while editing an approval'); },
+  });
+
   /** Edits replace the pending approval with a new one, so the user must approve the new content. */
   async function reissueEdited(old: Approval, edited: NonNullable<z.infer<typeof ApproveBody>['edited']>) {
-    const def = TOOL_BY_NAME.get(old.tool);
+    const def = ANY_TOOL_BY_NAME.get(old.tool);
     if (!def?.approval) return { error: 'edit_not_supported' as const };
     // Fields this tool doesn't have (e.g. `to` on a calendar invite) must not be silently dropped.
     const shape = (def.input as unknown as z.ZodObject).shape;
@@ -125,7 +141,7 @@ export async function agentRoutes(app: FastifyInstance, ctx: B1Context, hub: Run
     if (!parsed.success) return { error: 'invalid_edit' as const, message: parsed.error.message };
     const payload = JSON.parse(JSON.stringify(parsed.data)) as Record<string, unknown>;
     if (canonicalJson(payload) === canonicalJson(old.payload)) return { changed: false as const };
-    const spec = def.approval(parsed.data);
+    const spec = await def.approval(parsed.data, approvalContext(old.userId));
     if (!spec) return { error: 'edit_not_supported' as const };
     if (!(await ctx.store.transitionApproval(old.actionId, 'pending', 'superseded'))) return { error: 'approval_not_pending' as const };
 

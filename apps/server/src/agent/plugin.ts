@@ -10,7 +10,9 @@ import { ApprovalGate } from './approvals';
 import type { Brain } from './brain';
 import { isDevSecret, loadConfig, type B1Config } from './config';
 import type { B1Context } from './context';
+import { composioGateway, type ComposioGateway } from '../connectors/composio';
 import { RunHub } from './hub';
+import { toolset } from './toolset';
 import { claudeBrain } from './llm';
 import { mockBrain } from './mockBrain';
 import { notificationRoutes, type NotifyOptions } from './notifications';
@@ -27,6 +29,8 @@ export interface B1Options {
   /** Overrides the agent brain (tests). Defaults to MOCK_AGENT's scripts or Claude. */
   brain?: Brain;
   notify?: Partial<NotifyOptions>;
+  /** Overrides the Composio gateway (tests). Defaults to a real one when COMPOSIO_API_KEY is set. */
+  composio?: ComposioGateway;
 }
 
 export async function registerB1(app: FastifyInstance, opts: B1Options) {
@@ -45,11 +49,22 @@ export async function registerB1(app: FastifyInstance, opts: B1Options) {
     media: opts.media,
     tokenKey: resolveKey(config.tokenEncKey, config.sessionSecret),
     modeEvents: new EventEmitter().setMaxListeners(0),
+    tools: [],
   };
+  // Composio (any app, connected on demand) unless MOCK_CONNECTORS asks for the offline demo workspace.
+  // MOCK_AGENT's canned scripts drive the native tools, so they keep the native toolset too.
+  if (!config.mockConnectors && (!config.mockAgent || opts.composio)) {
+    ctx.composio = opts.composio ?? (config.composio.apiKey
+      ? composioGateway({ apiKey: config.composio.apiKey, callbackUrl: config.composio.callbackUrl })
+      : undefined);
+  }
+  ctx.tools = toolset(Boolean(ctx.composio));
+  app.log.info({ composio: Boolean(ctx.composio), tools: ctx.tools.map(t => t.name) }, 'B1 agent tools');
+
   const hub = new RunHub(ctx.store);
   const brain = opts.brain ?? (config.mockAgent
     ? mockBrain(Number(process.env.MOCK_AGENT_DELAY_MS ?? 700))
-    : claudeBrain({ agentModel: config.agentModel, effort: (process.env.AGENT_EFFORT as 'low') ?? 'low' }));
+    : claudeBrain({ agentModel: config.agentModel, effort: (process.env.AGENT_EFFORT as 'low') ?? 'low' }, undefined, ctx.tools));
   const runner = new AgentRunner(ctx, hub, new ApprovalGate(), brain);
 
   await authRoutes(app, ctx);
