@@ -8,6 +8,6 @@
     "typecheck": "pnpm -r typecheck",
     "gen:bundles": "pnpm --filter @fetch/web gen:bundles",
     "dev:overlay": "pnpm --filter @fetch/overlay dev",
-    "build": "pnpm --filter @fetch/web build && pnpm --filter @fetch/desk build && pnpm --filter @fetch/server build"
+    "build": "pnpm --filter @fetch/web build && pnpm --filter @fetch/desk build && pnpm --filter @fetch/server build && node scripts/merge-web-dist.mjs"
   }
 }

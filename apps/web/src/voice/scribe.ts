@@ -5,6 +5,8 @@
 // There is no fallback recognizer: no key, no credits or no internet means onError('unavailable').
 
 const WS = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime';
+const env = (import.meta as ImportMeta & { env?: { VITE_FETCH_API_URL?: string } }).env;
+const API_BASE = (env?.VITE_FETCH_API_URL ?? '').replace(/\/$/, '');
 const RATE = 16000, CHUNK = 1600;     // 100 ms of 16 kHz audio per message
 const FINAL_WAIT_MS = 2500;           // after a manual stop: how long to wait for the final text before using the last partial
 const SESSION_MS = 15000;             // no turn is longer than this (a silent room never commits by itself)
@@ -25,7 +27,7 @@ const WORKLET = URL.createObjectURL(new Blob([
 
 let spare: Promise<string> | undefined;
 const mint = async () => {
-  const r = await fetch('/voice/stt-token', { credentials: 'include' });
+  const r = await fetch(`${API_BASE}/voice/stt-token`, { credentials: 'include' });
   if (!r.ok) throw new Error(`stt-token ${r.status}`);
   return ((await r.json()) as { token: string }).token;
 };

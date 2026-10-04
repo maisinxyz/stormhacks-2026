@@ -22,8 +22,9 @@ export const bridge = {
   },
 };
 
-/** API base: same origin (vite proxy in dev, app:// handler in prod); ?api=... overrides. */
-export const API = new URLSearchParams(location.search).get('api') ?? '';
+/** API base: ?api=... overrides the Vercel build-time backend URL. */
+const env = (import.meta as ImportMeta & { env?: { VITE_FETCH_API_URL?: string } }).env;
+export const API = (new URLSearchParams(location.search).get('api') ?? env?.VITE_FETCH_API_URL ?? '').replace(/\/$/, '');
 
 export async function api<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
   const { json, ...rest } = init;

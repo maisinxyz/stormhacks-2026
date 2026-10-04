@@ -10,6 +10,8 @@ export interface GenerateInput { kind: 'photo' | 'drawing'; image: Blob; species
 export interface GenerateProgress { stage: string; pct: number; detail?: string }
 type EngineEvent = Parameters<Engine['pushToolEvent']>[0]
 
+const API_BASE = ((import.meta.env.VITE_FETCH_API_URL as string | undefined) ?? '').replace(/\/$/, '')
+
 function hasWebGL() {
   try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') ?? c.getContext('webgl')) } catch { return false }
 }
@@ -23,7 +25,7 @@ export class DeskEngine implements PetEngine {
   private loadedKey = ''
   private loads: Promise<void> = Promise.resolve()
 
-  constructor() { if (hasWebGL()) this.real = new Engine() }
+  constructor() { if (hasWebGL()) this.real = new Engine({ apiBase: API_BASE }) }
 
   /** True when the WebGL splat engine is running (false = mock fallback). */
   get isReal() { return !!this.real && this.mounted }
@@ -73,7 +75,7 @@ export class DeskEngine implements PetEngine {
   }
 
   generatePet(input: GenerateInput, onProgress: (p: GenerateProgress) => void) {
-    return this.real ? this.real.generatePet(input, onProgress) : runPipeline('', input, onProgress)
+    return this.real ? this.real.generatePet(input, onProgress) : runPipeline(API_BASE, input, onProgress)
   }
 
   setMode(mode: Mode) { this.mock.setMode(mode); this.real?.setMode(mode) }

@@ -1,5 +1,7 @@
 import type { ActionStep, Mode, RunEvent } from './contracts'
 
+const DEFAULT_API_BASE = ((import.meta.env.VITE_FETCH_API_URL as string | undefined) ?? '').replace(/\/$/, '')
+
 export interface ApprovalState {
   actionId: string
   runId: string
@@ -49,7 +51,7 @@ export function apiErrorCopy(code: string) {
 }
 
 export class FetchApiClient {
-  constructor(private readonly baseUrl = '') {}
+  constructor(private readonly baseUrl = DEFAULT_API_BASE) {}
 
   async setMode(mode: Mode) {
     try { await fetch(`${this.baseUrl}/mode`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) }) } catch { /* mock mode stays local */ }
