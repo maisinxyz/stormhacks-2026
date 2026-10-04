@@ -9,6 +9,9 @@ export interface PetBundle {
   id: string
   name: string
   species: Species
+  splatUrl: string
+  rigUrl: string
+  weightsUrl: string
   thumbnailUrl: string
   voiceId?: string
   personality: { eager: number; sassy: number; anxious: number; chatty: number }
@@ -26,14 +29,14 @@ export interface ActionStep {
 
 export type RunEvent =
   | { type: 'run.started'; runId: string }
-  | { type: 'run.plan'; runId: string; steps: ActionStep[] }
+  | { type: 'run.plan'; steps: ActionStep[] }
   | { type: 'run.say'; text: string }
   | { type: 'tool.start'; stepId: string; tool: string; label: string }
   | { type: 'tool.progress'; stepId: string; note: string; itemsRead?: number }
   | { type: 'tool.retry'; stepId: string; attempt: number }
   | { type: 'tool.end'; stepId: string; ok: boolean }
   | { type: 'approval.required'; actionId: string; kind: 'send_email' | 'delete' | 'share' | 'calendar_invite' | 'other'; preview: { to?: string[]; subject?: string; body?: string; summary: string }; contentHash: string }
-  | { type: 'run.result'; summary: string; mood: Mood }
+  | { type: 'run.result'; summary: string; mood: Mood; prop?: ActionStep['prop'] }
   | { type: 'run.error'; code: string; message: string; mood: 'sheepish' | 'exhausted' }
   | { type: 'run.cancelled' }
 
@@ -46,7 +49,8 @@ export interface PetEngine {
   setPlatforms(platforms: PlatformRect[]): void
   runPlan(steps: ActionStep[]): void
   pushToolEvent(event: RunEvent): void
+  showResult(prop: ActionStep['prop'], mood: Mood): void
+  setApprovalPending(pending: boolean): void
   setSpeaking(amplitude: number): void
   doIntent(intent: LocalIntent): void
 }
-

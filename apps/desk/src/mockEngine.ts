@@ -1,4 +1,4 @@
-import type { ActionStep, Mode, PetBundle, PetEngine, PlatformRect, RunEvent, LocalIntent } from './contracts'
+import type { ActionStep, Mode, Mood, PetBundle, PetEngine, PlatformRect, RunEvent, LocalIntent } from './contracts'
 
 export class MockPetEngine implements PetEngine {
   private status = 'perched'
@@ -12,6 +12,8 @@ export class MockPetEngine implements PetEngine {
   pushToolEvent(event: RunEvent) {
     if (event.type === 'run.result' || event.type === 'run.error' || event.type === 'run.cancelled') this.status = 'perched'
   }
+  showResult(_prop: ActionStep['prop'], _mood: Mood) { this.status = 'perched' }
+  setApprovalPending(pending: boolean) { this.status = pending ? 'waiting for approval' : 'perched' }
   setSpeaking(_amplitude: number) {}
   doIntent(intent: LocalIntent) { this.status = intent.replace('_', ' ') }
   getStatus() { return this.status }

@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { PointerEvent } from 'react'
-import { Bell, CalendarDays, ChevronDown, CircleHelp, FileText, Inbox, LayoutGrid, Mic, MoreHorizontal, PawPrint, Play, Plus, Search, Settings, Sparkles, Volume2, X } from 'lucide-react'
-import type { LocalIntent, Mode, PetBundle, Species } from './contracts'
+import type { PointerEvent, ReactNode } from 'react'
+import { Bell, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, ExternalLink, FileText, Inbox, LayoutGrid, Mail, Mic, MoreHorizontal, PawPrint, Plus, Search, Send, Settings, Sparkles, SlidersHorizontal, Trash2, Volume2, X } from 'lucide-react'
+import type { LocalIntent, Mode, PetBundle, RunEvent, Species } from './contracts'
 import { MockPetEngine } from './mockEngine'
 import { getSpeechRecognition, speakWithBrowserTts, unlockMicrophone } from './voice'
+import { FetchApiClient, type ApprovalState, type NotificationItem, type RunState, type SettingsState } from './api'
+import { useFetchStore } from './store'
 
 const demoPet: PetBundle = {
   id: 'demo-parrot', name: 'Pip', species: 'bird', thumbnailUrl: '',
+  splatUrl: '', rigUrl: '', weightsUrl: '',
   personality: { eager: .8, sassy: .35, anxious: .2, chatty: .92 },
   stats: { energy: 82, happiness: 91, hunger: 24 }, createdAt: new Date().toISOString(),
 }
@@ -18,20 +21,29 @@ const windows = [
 ]
 
 function App() {
-  const [mode, setMode] = useState<Mode>('work')
-  const [pet, setPet] = useState<PetBundle | null>(demoPet)
+  const store = useFetchStore(demoPet)
+  const { state: appState, setMode, addPet, addRun, updateRun, addApproval, removeApproval, setNotifications, updateSettings, setVoice } = store
+  const mode = appState.mode
+  const pet = appState.pets.find((item) => item.id === appState.activePetId) ?? null
   const [activeWindow, setActiveWindow] = useState('inbox')
   const [toast, setToast] = useState('')
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [awake, setAwake] = useState(false)
-  const [listening, setListening] = useState(false)
-  const [speaking, setSpeaking] = useState(false)
-  const [micAvailable, setMicAvailable] = useState(true)
+  const listening = appState.voice.listening
+  const speaking = appState.voice.speaking
   const [command, setCommand] = useState('')
+  const [showRunLog, setShowRunLog] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const api = useMemo(() => new FetchApiClient(), [])
   const engine = useMemo(() => new MockPetEngine(), [])
   const mainCanvas = useRef<HTMLCanvasElement>(null)
   const peekCanvas = useRef<HTMLCanvasElement>(null)
   const recognition = useRef<ReturnType<typeof getSpeechRecognition>>(null)
+
+  const setListening = (value: boolean) => setVoice({ listening: value })
+  const setSpeaking = (value: boolean) => setVoice({ speaking: value })
+  const setMicAvailable = (value: boolean) => setVoice({ micAvailable: value })
 
   useEffect(() => {
     if (mainCanvas.current && peekCanvas.current) engine.mount(mainCanvas.current, peekCanvas.current)
@@ -39,7 +51,9 @@ function App() {
   }, [engine, pet])
 
   const setDeskMode = (next: Mode) => {
-    setMode(next); engine.setMode(next)
+    const activeRun = appState.runs.find((run) => run.status === 'running' || run.status === 'approval')
+    if (activeRun) { setToast('Pip will finish the current errand before switching modes'); return }
+    setMode(next); engine.setMode(next); void api.setMode(next)
     setToast(next === 'work' ? 'Work mode on · your connectors are ready' : 'Play mode on · connectors are tucked away')
     window.setTimeout(() => setToast(''), 2800)
   }
@@ -64,7 +78,26 @@ function App() {
     if (local === 'feed') { engine.doIntent('trick'); setToast(`${pet?.name ?? 'Your pet'} got a treat`); return }
     if (local) { engine.doIntent(local); setToast(`${pet?.name ?? 'Your pet'} will ${local.replace('_', ' ')}`); return }
     if (mode === 'play') { speak('It is playtime. Ask me to chase, fetch, or dance.'); setToast('Play mode keeps work errands tucked away'); return }
-    setToast(`I heard: “${text}”`)
+    void runAgent(text)
+  }
+
+  const handleRunEvent = (runId: string, event: RunEvent) => {
+    if (event.type === 'run.started') updateRun(runId, { status: 'running', events: [event] })
+    if (event.type === 'run.plan') { engine.runPlan(event.steps); updateRun(runId, { status: 'running', steps: event.steps, events: [event] }) }
+    if (event.type === 'run.say') speak(event.text)
+    if (event.type === 'tool.start' || event.type === 'tool.progress' || event.type === 'tool.retry' || event.type === 'tool.end') { engine.pushToolEvent(event); updateRun(runId, { events: [event] }) }
+    if (event.type === 'approval.required') { engine.pushToolEvent(event); engine.setApprovalPending(true); addApproval({ ...event, runId }); updateRun(runId, { status: 'approval', events: [event] }); setToast('Pip is waiting for your approval') }
+    if (event.type === 'run.result') { engine.pushToolEvent(event); updateRun(runId, { status: 'complete', summary: event.summary, events: [event] }); setToast(event.summary) }
+    if (event.type === 'run.error') { engine.pushToolEvent(event); updateRun(runId, { status: 'error', summary: event.message, events: [event] }); setToast(event.message) }
+    if (event.type === 'run.cancelled') { engine.pushToolEvent(event); updateRun(runId, { status: 'cancelled', events: [event] }) }
+  }
+
+  const runAgent = async (text: string) => {
+    if (mode === 'play') { speak('It is playtime. Ask me to chase, fetch, or dance.'); setToast('Play mode keeps work errands tucked away'); return }
+    let runId = ''
+    runId = await api.runAgent(pet?.id ?? demoPet.id, text, (event) => handleRunEvent(runId || (event.type === 'run.started' ? event.runId : ''), event))
+    addRun({ id: runId, text, status: 'queued', steps: [], events: [], startedAt: new Date().toISOString() })
+    setShowRunLog(true)
   }
 
   const startListening = () => {
@@ -99,7 +132,7 @@ function App() {
       <div className="workspace-label">Your desk</div>
       <nav className="nav-list" aria-label="Primary navigation">
         <button className="nav-item active"><LayoutGrid size={17} /> Desk <span className="nav-hotkey">⌘1</span></button>
-        <button className="nav-item"><Bell size={17} /> Notifications <span className="badge">3</span></button>
+        <button className="nav-item" onClick={() => { setShowNotifications(true); void api.getNotifications().then(setNotifications) }}><Bell size={17} /> Notifications <span className="badge">{appState.notifications.filter((item) => item.unread).length || 3}</span></button>
       </nav>
       <div className="sidebar-divider" />
       <div className="workspace-label">Pets</div>
@@ -107,13 +140,13 @@ function App() {
         <span className="pet-avatar bird-avatar">✦</span><span className="pet-switcher-copy"><strong>{pet?.name ?? 'New pet'}</strong><small>{pet ? 'Parrot · online' : 'Create your first pet'}</small></span><ChevronDown size={15} />
       </button>
       <button className="add-pet" onClick={() => setShowOnboarding(true)}><Plus size={15} /> Add a pet</button>
-      <div className="sidebar-bottom"><button className="nav-item"><Settings size={17} /> Settings</button><button className="nav-item"><CircleHelp size={17} /> Help center</button><div className="profile"><span className="profile-avatar">VO</span><span><strong>Vince Ong</strong><small>Personal workspace</small></span><MoreHorizontal size={16} /></div></div>
+      <div className="sidebar-bottom"><button className="nav-item" onClick={() => setShowSettings(true)}><Settings size={17} /> Settings</button><button className="nav-item"><CircleHelp size={17} /> Help center</button><div className="profile"><span className="profile-avatar">VO</span><span><strong>Vince Ong</strong><small>Personal workspace</small></span><MoreHorizontal size={16} /></div></div>
     </aside>
 
     <main className="desk" onClick={() => setActiveWindow('desk')}>
       <header className="topbar">
         <div className="breadcrumb"><span>Desk</span><span className="slash">/</span><span className="muted">Tuesday, October 14</span></div>
-        <div className="top-actions"><span className="connection-pill"><span className="online-dot" /> All systems good</span><button className="icon-button" aria-label="Search"><Search size={18} /></button><button className="icon-button" aria-label="Notifications"><Bell size={18} /><span className="notification-dot" /></button></div>
+        <div className="top-actions"><span className="connection-pill"><span className="online-dot" /> All systems good</span><button className="icon-button" aria-label="Search"><Search size={18} /></button><button className="icon-button" aria-label="Notifications" onClick={() => { setShowNotifications(true); void api.getNotifications().then(setNotifications) }}><Bell size={18} /><span className="notification-dot" /></button></div>
       </header>
       <section className="desk-canvas" aria-label="Fetch Desk workspace">
         <div className="desk-heading"><div><span className="eyebrow">Good morning, Vince</span><h1>What should we fetch?</h1></div><div className="mode-switch" role="group" aria-label="Mode"><button className={mode === 'work' ? 'selected' : ''} onClick={(e) => { e.stopPropagation(); setDeskMode('work') }}>Work</button><button className={mode === 'play' ? 'selected play-selected' : ''} onClick={(e) => { e.stopPropagation(); setDeskMode('play') }}><Sparkles size={14} /> Play</button></div></div>
@@ -122,14 +155,18 @@ function App() {
           <div className="sun-wash" /><div className="world-note"><span className="note-pin" /> Pip is perched on your Desk <button aria-label="Dismiss note">×</button></div>
           {windows.map(({ id, title, eyebrow, icon: Icon, className }) => <DeskWindow key={id} id={id} title={title} eyebrow={eyebrow} Icon={Icon} className={className} active={activeWindow === id} onActivate={() => setActiveWindow(id)} mode={mode} />)}
           <div className="pet-stage" aria-label={`${pet?.name ?? 'Your pet'} is perched on the desk`}><div className="pet-shadow" /><div className="pet-glow" /><div className="pet-illustration">{pet?.species === 'bird' ? '✦' : '◒'}</div><div className="pet-bubble">{mode === 'work' ? 'Ready when you are.' : 'Play with me!'}</div><canvas ref={mainCanvas} className="engine-canvas" /><div className="pet-nameplate"><span className="status-dot" />{pet?.name ?? 'New pet'} <span>·</span> <span className="muted">{engine.getStatus()}</span></div></div>
-          <div className="peek-dock"><div className="peek-header"><span><span className="peek-live" /> Peek</span><button aria-label="Close peek"><X size={14} /></button></div><canvas ref={peekCanvas} /><div className="peek-scene"><span className="peek-pet">✦</span><span className="peek-copy"><strong>Pip is on it</strong><small>Waiting for a new command</small></span></div></div>
+          <button className="peek-dock" onClick={(e) => { e.stopPropagation(); setShowRunLog(true) }}><div className="peek-header"><span><span className="peek-live" /> Peek</span><span className="peek-open-label">Open log ↗</span></div><canvas ref={peekCanvas} /><div className="peek-scene"><span className="peek-pet">✦</span><span className="peek-copy"><strong>{appState.runs[0]?.status === 'running' ? 'Pip is on it' : 'Run log is ready'}</strong><small>{appState.runs[0]?.status === 'running' ? 'Working in the background' : 'Click to see recent errands'}</small></span></div></button>
         </div>
         <div className="desk-footer"><div className="tray treat-tray"><span className="tray-icon">✺</span><span><strong>Treat tray</strong><small>Drag to Pip</small></span><span className="treats">● ● ●</span></div><div className="tray toy-tray"><span className="tray-icon">◉</span><span><strong>Toy box</strong><small>Make playtime</small></span><span className="toys">◌ ◇</span></div><div className="desk-tip"><Sparkles size={14} /> Try “find my budget sheet”</div></div>
       </section>
     </main>
     {toast && <div className="toast"><span className="toast-check">✓</span>{toast}</div>}
     {!awake && <button className="wake-button" onClick={async () => { const available = await unlockMicrophone(); setMicAvailable(available); setAwake(true); setToast(available ? 'Audio unlocked · Pip is listening' : 'Audio unlocked · mic permission is still needed') }}><Volume2 size={17} /> Wake up Pip</button>}
-    {showOnboarding && <Onboarding onClose={() => setShowOnboarding(false)} onCreate={(newPet) => { setPet(newPet); setShowOnboarding(false); setToast(`${newPet.name} is ready to meet you`) }} />}
+    {showOnboarding && <Onboarding onClose={() => setShowOnboarding(false)} onCreate={(newPet) => { addPet(newPet); setShowOnboarding(false); setToast(`${newPet.name} is ready to meet you`) }} />}
+    {appState.approvals[0] && <ApprovalCard approval={appState.approvals[0]} onApprove={async () => { const approval = appState.approvals[0]; await api.approve(approval.runId, approval.actionId, approval.contentHash); removeApproval(approval.actionId); engine.setApprovalPending(false); updateRun(approval.runId, { status: 'complete', summary: 'Approved and sent.', events: [{ type: 'run.result', summary: 'Approved and sent.', mood: 'proud' }] }); setToast('Approved · Pip sent it') }} onCancel={async () => { const approval = appState.approvals[0]; await api.cancel(approval.runId); removeApproval(approval.actionId); engine.setApprovalPending(false); updateRun(approval.runId, { status: 'cancelled' }); setToast('Cancelled · nothing was sent') }} />}
+    {showRunLog && <RunLogPanel runs={appState.runs} onClose={() => setShowRunLog(false)} onCancel={async (runId) => { await api.cancel(runId); updateRun(runId, { status: 'cancelled' }); setToast('Errand cancelled') }} />}
+    {showNotifications && <NotificationsPanel notifications={appState.notifications} onClose={() => setShowNotifications(false)} />}
+    {showSettings && <SettingsPanel settings={appState.settings} onChange={updateSettings} onClose={() => setShowSettings(false)} />}
   </div>
 }
 
@@ -140,7 +177,7 @@ function DeskWindow({ id, title, eyebrow, Icon, className, active, onActivate, m
 function Onboarding({ onClose, onCreate }: { onClose: () => void; onCreate: (pet: PetBundle) => void }) {
   const [step, setStep] = useState(1); const [species, setSpecies] = useState<Species>('bird'); const [name, setName] = useState(''); const [inputMode, setInputMode] = useState<'upload' | 'draw'>('draw'); const [progress, setProgress] = useState(0)
   const speciesList: { id: Species; label: string; emoji: string; blurb: string }[] = [{ id: 'dog', label: 'Dog', emoji: '◕ᴥ◕', blurb: 'Eager & loyal' }, { id: 'cat', label: 'Cat', emoji: '◡ᴗ◡', blurb: 'Sassy & capable' }, { id: 'rodent', label: 'Rodent', emoji: '•ᴥ•', blurb: 'Anxious & thorough' }, { id: 'bird', label: 'Bird', emoji: '✦', blurb: 'Chatty & curious' }]
-  const create = () => { const pet: PetBundle = { id: `pet-${Date.now()}`, name: name || 'Pip', species, thumbnailUrl: '', personality: { eager: .8, sassy: .35, anxious: .2, chatty: .8 }, stats: { energy: 100, happiness: 80, hunger: 15 }, createdAt: new Date().toISOString() }; onCreate(pet) }
+  const create = () => { const pet: PetBundle = { id: `pet-${Date.now()}`, name: name || 'Pip', species, splatUrl: '', rigUrl: '', weightsUrl: '', thumbnailUrl: '', personality: { eager: .8, sassy: .35, anxious: .2, chatty: .8 }, stats: { energy: 100, happiness: 80, hunger: 15 }, createdAt: new Date().toISOString() }; onCreate(pet) }
   return <div className="modal-backdrop"><section className="onboarding" role="dialog" aria-modal="true" aria-labelledby="onboarding-title"><button className="modal-close" onClick={onClose} aria-label="Close onboarding"><X /></button>{step < 4 ? <><div className="modal-kicker">A new companion</div><h2 id="onboarding-title">Let’s make your pet.</h2><p className="modal-intro">A little image, a little personality, and a lot of character.</p><div className="progress-steps"><span className="done">01</span><i /><span className={step >= 2 ? 'done' : ''}>02</span><i /><span className={step >= 3 ? 'done' : ''}>03</span></div>{step === 1 && <><div className="species-grid">{speciesList.map((item) => <button key={item.id} className={`species-card ${species === item.id ? 'chosen' : ''}`} onClick={() => setSpecies(item.id)}><span className={`species-glyph ${item.id}`}>{item.emoji}</span><strong>{item.label}</strong><small>{item.blurb}</small></button>)}</div><button className="primary-button" onClick={() => setStep(2)}>Choose {speciesList.find((item) => item.id === species)?.label} <span>→</span></button></>}{step === 2 && <><div className="input-tabs"><button className={inputMode === 'draw' ? 'active' : ''} onClick={() => setInputMode('draw')}>Draw a pet</button><button className={inputMode === 'upload' ? 'active' : ''} onClick={() => setInputMode('upload')}>Upload a photo</button></div>{inputMode === 'draw' ? <DrawPad /> : <label className="upload-zone"><span>↑</span><strong>Drop a photo here</strong><small>or choose a file from your computer</small><input type="file" accept="image/*" capture="user" /></label>}<div className="name-field"><label htmlFor="pet-name">What should we call them?</label><input id="pet-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pip, Miso, Orbit" /></div><div className="modal-actions"><button className="text-button" onClick={() => setStep(1)}>Back</button><button className="primary-button compact" onClick={() => setStep(3)}>Continue <span>→</span></button></div></>}{step === 3 && <><div className="personality-intro"><span className="preview-glyph">{species === 'bird' ? '✦' : speciesList.find((item) => item.id === species)?.emoji}</span><div><strong>{name || 'Pip'} is taking shape</strong><small>Set the dials, or keep their natural spark.</small></div></div><div className="slider-list"><label><span>Eager</span><input type="range" defaultValue="80" /><span>80</span></label><label><span>Sassy</span><input type="range" defaultValue="35" /><span>35</span></label><label><span>Anxious</span><input type="range" defaultValue="20" /><span>20</span></label><label><span>Chatty</span><input type="range" defaultValue="90" /><span>90</span></label></div><div className="modal-actions"><button className="text-button" onClick={() => setStep(2)}>Back</button><button className="primary-button compact" onClick={() => { setStep(4); let i = 0; const timer = window.setInterval(() => { i += 20; setProgress(i); if (i >= 100) { window.clearInterval(timer); create() } }, 180) }}>Create {name || 'Pip'} <Sparkles size={16} /></button></div></>}</> : <div className="creating-state"><div className="creation-glyph">✦</div><div className="modal-kicker">Building {name || 'Pip'}</div><h2>Turning a spark into a companion.</h2><p>Segmenting the drawing · fitting their little rig · finding their voice</p><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><small>{progress < 40 ? 'Cleaning up the reference…' : progress < 80 ? 'Teaching them how to move…' : 'Almost time to say hello…'}</small></div>}</section></div>
 }
 
@@ -159,5 +196,31 @@ function DrawPad() {
   const undo = () => { const previous = history[history.length - 1]; if (!previous || !canvas.current) return; const context = canvas.current.getContext('2d')!; context.putImageData(previous, 0, 0); setHistory((items) => items.slice(0, -1)) }
   return <div className="draw-pad"><div className="draw-toolbar"><button className={tool === 'brush' ? 'tool-selected' : ''} onClick={() => setTool('brush')} aria-label="Brush">●</button><button className={tool === 'eraser' ? 'tool-selected' : ''} onClick={() => setTool('eraser')} aria-label="Eraser">○</button><input type="color" value={color} onChange={(event) => setColor(event.target.value)} aria-label="Brush color" /><button onClick={undo} aria-label="Undo">↶</button><button onClick={clear} aria-label="Clear drawing">⌫</button></div><canvas ref={canvas} width={520} height={140} onPointerDown={down} onPointerMove={move} onPointerUp={() => { drawing.current = false }} onPointerLeave={() => { drawing.current = false }} aria-label="Draw your pet" /><small>Draw your pet here · rough is perfect</small></div>
 }
+
+function ApprovalCard({ approval, onApprove, onCancel }: { approval: ApprovalState; onApprove: () => void; onCancel: () => void }) {
+  return <div className="approval-layer"><section className="approval-card" role="dialog" aria-modal="true" aria-labelledby="approval-title"><div className="approval-kicker"><span className="approval-icon"><Send size={17} /></span><span>Human approval needed</span><button className="panel-close" onClick={onCancel} aria-label="Cancel approval"><X size={17} /></button></div><h2 id="approval-title">Send this for me?</h2><p className="approval-summary">{approval.preview.summary}</p><div className="approval-preview"><div><small>To</small><strong>{approval.preview.to?.join(', ')}</strong></div><div><small>Subject</small><strong>{approval.preview.subject}</strong></div><div><small>Message</small><p>{approval.preview.body}</p></div></div><div className="approval-actions"><button className="secondary-action" onClick={onCancel}>Cancel</button><button className="approve-action" onClick={onApprove}><span className="bone-mark">✦</span> Approve & send</button></div><small className="approval-footnote">Pip can only send the exact preview shown above.</small></section></div>
+}
+
+function RunLogPanel({ runs, onClose, onCancel }: { runs: RunState[]; onClose: () => void; onCancel: (runId: string) => void }) {
+  return <div className="panel-layer"><aside className="side-panel run-panel" role="dialog" aria-labelledby="run-log-title"><PanelHeader icon={<Clock3 size={17} />} eyebrow="Live activity" title="Run log" onClose={onClose} />{runs.length === 0 ? <EmptyPanel title="No errands yet" text="Ask Pip to find, read, or organise something from the command bar." /> : <div className="run-list">{runs.map((run) => <article className="run-item" key={run.id}><div className="run-item-top"><span className={`run-status ${run.status}`} /> <strong>{run.text}</strong><span className="run-time">{run.status === 'running' ? 'Now' : run.status}</span></div><div className="run-steps">{run.steps.length ? run.steps.map((step) => <div className="run-step" key={step.id}><span className="step-check">{run.status === 'running' ? '·' : '✓'}</span><span>{step.label}</span><small>{step.verb}</small></div>) : <div className="run-step"><span className="step-check">·</span><span>Making a plan…</span></div>}</div>{run.summary && <p className="run-summary">{run.summary}</p>}{(run.status === 'running' || run.status === 'approval') && <button className="cancel-run" onClick={() => onCancel(run.id)}>Cancel errand</button>}</article>)}</div>}<div className="queue-tray"><Sparkles size={15} /><span><strong>Queue tray</strong><small>{runs.filter((run) => run.status === 'queued').length ? `${runs.filter((run) => run.status === 'queued').length} next up` : 'Ready for the next command'}</small></span></div></aside></div>
+}
+
+function NotificationsPanel({ notifications, onClose }: { notifications: NotificationItem[]; onClose: () => void }) {
+  return <div className="panel-layer"><aside className="side-panel notifications-panel" role="dialog" aria-labelledby="notifications-title"><PanelHeader icon={<Bell size={17} />} eyebrow="Work mode" title="Notifications" onClose={onClose} />{notifications.length === 0 ? <EmptyPanel title="Nothing new" text="Fetch will surface unread mail and upcoming meetings here." /> : <div className="notification-list">{notifications.map((item) => <article className={`notification-item ${item.unread ? 'unread' : ''}`} key={item.id}><span className={`notification-icon ${item.kind}`} >{item.kind === 'email' ? <Mail size={15} /> : <CalendarDays size={15} />}</span><span><strong>{item.title}</strong><small>{item.detail}</small></span><time>{item.time}</time></article>)}</div>}<p className="panel-note">Pip reacts to work notifications on the Desk. Play mode keeps them quiet.</p></aside></div>
+}
+
+function SettingsPanel({ settings, onChange, onClose }: { settings: SettingsState; onChange: (patch: Partial<SettingsState>) => void; onClose: () => void }) {
+  return <div className="panel-layer"><aside className="side-panel settings-panel" role="dialog" aria-labelledby="settings-title"><PanelHeader icon={<Settings size={17} />} eyebrow="Personalise Fetch" title="Settings" onClose={onClose} /><div className="settings-group"><h3>Voice</h3><SettingToggle label="Voice replies" description="Let Pip speak short updates" checked={settings.voiceEnabled} onChange={(checked) => onChange({ voiceEnabled: checked })} /><label className="setting-row"><span><strong>Volume</strong><small>Pet speech and sound effects</small></span><input type="range" min="0" max="100" value={settings.volume} onChange={(event) => onChange({ volume: Number(event.target.value) })} /><b>{settings.volume}</b></label><div className="setting-row"><span><strong>Input mode</strong><small>How Fetch listens for commands</small></span><div className="segmented"><button className={settings.inputMode === 'ptt' ? 'selected' : ''} onClick={() => onChange({ inputMode: 'ptt' })}>Push to talk</button><button className={settings.inputMode === 'hands-free' ? 'selected' : ''} onClick={() => onChange({ inputMode: 'hands-free' })}>Hands-free</button></div></div></div><div className="settings-group"><h3>Desk & pet</h3><div className="setting-row"><span><strong>Visual quality</strong><small>Splats and animation detail</small></span><div className="segmented"><button className={settings.quality === 'high' ? 'selected' : ''} onClick={() => onChange({ quality: 'high' })}>High</button><button className={settings.quality === 'low' ? 'selected' : ''} onClick={() => onChange({ quality: 'low' })}>Low</button></div></div><SettingToggle label="Subtitles" description="Show captions for pet speech" checked={settings.subtitles} onChange={(checked) => onChange({ subtitles: checked })} /><SettingToggle label="Reduce motion" description="Use calmer Desk transitions" checked={settings.reduceMotion} onChange={(checked) => onChange({ reduceMotion: checked })} /><SettingToggle label="Sketchy shader" description="Give drawings a paper-grain edge" checked={settings.sketchyShader} onChange={(checked) => onChange({ sketchyShader: checked })} /></div><div className="settings-group danger-group"><h3>Data</h3><button className="delete-data"><Trash2 size={15} /> Delete my data <span>↗</span></button><small>Demo mode is on · no real accounts or messages are connected.</small></div></aside></div>
+}
+
+function SettingToggle({ label, description, checked, onChange }: { label: string; description: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return <label className="setting-row"><span><strong>{label}</strong><small>{description}</small></span><button className={`toggle ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)} aria-pressed={checked}><span /></button></label>
+}
+
+function PanelHeader({ icon, eyebrow, title, onClose }: { icon: ReactNode; eyebrow: string; title: string; onClose: () => void }) {
+  return <div className="panel-header"><span className="panel-icon">{icon}</span><span><small>{eyebrow}</small><strong id={title === 'Run log' ? 'run-log-title' : title === 'Notifications' ? 'notifications-title' : 'settings-title'}>{title}</strong></span><button className="panel-close" onClick={onClose} aria-label={`Close ${title}`}><X size={17} /></button></div>
+}
+
+function EmptyPanel({ title, text }: { title: string; text: string }) { return <div className="empty-panel"><Sparkles size={22} /><strong>{title}</strong><p>{text}</p></div> }
 
 export default App
