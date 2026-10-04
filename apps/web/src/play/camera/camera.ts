@@ -9,6 +9,7 @@ import type { OrientationStatus } from './pose';
 import type { LocalIntent } from '@fetch/contracts';
 import type { PlayContext, PlayView, PlayViewId } from '../types';
 import { plushFromPhoto } from '../../engine/sdf/fromPhoto';
+import { knownBundle, knownDog } from '../../engine/sdf/known';
 import { Alive } from './lookat';
 import './camera.css';
 import { composite, deliver } from './capture';
@@ -240,13 +241,14 @@ export class CameraView implements PlayView {
   private async usePhoto(file: File) {
     const e = this.ctx.engine, s = this.ctx.session;
     try {
-      s.bundle = { ...s.bundle, id: `plush-${Date.now()}`, plush: await plushFromPhoto(file) as unknown as Record<string, unknown> };
+      const known = await knownDog(file); // a hard-coded dog made from this exact photo wins over the colour guess
+      s.bundle = known ? knownBundle(known) : { ...s.bundle, id: `plush-${Date.now()}`, plush: await plushFromPhoto(file) as unknown as Record<string, unknown> };
       await e.loadPet(s.bundle);
       e.setQuality(s.quality); e.setAutonomous(false); e.setSplatDepthTest(false);
       this.placeSide(false);
       e.flourish('sparkle');
       this.alive.focus(3);
-      this.ui.toast('Made a plush pet in the colours of your dog.', 4000);
+      this.ui.toast(known ? `That is ${known.name}!` : 'Made a plush pet in the colours of your dog.', 4000);
     } catch (err) {
       console.warn('photo -> plush failed', err);
       this.ui.toast('Could not read that photo. Try another one.');

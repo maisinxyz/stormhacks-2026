@@ -14,6 +14,7 @@ export interface PetBundle {
   weightsUrl: string
   thumbnailUrl: string
   voiceId?: string
+  plush?: Record<string, unknown>
   personality: { eager: number; sassy: number; anxious: number; chatty: number }
   stats: { energy: number; happiness: number; hunger: number }
   createdAt: string
