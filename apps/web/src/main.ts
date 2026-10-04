@@ -5,7 +5,7 @@ import { decodeSplat, encodeSplat } from './engine/pipeline/gaussians';
 import { fitRig, skinWeights } from './engine/pipeline/rig';
 
 async function boot() {
-const species = new URLSearchParams(location.search).get('pet') === 'bird' ? 'bird' : 'dog';
+const species = new URLSearchParams(location.search).get('pet') === 'cat' ? 'cat' : 'dog';
 const engine = new Engine();
 const fps = document.getElementById('fps')!;
 let last = 0, frames = 0, acc = 0;

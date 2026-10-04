@@ -114,10 +114,10 @@ export function PawTrail() {
   const { scrollYProgress } = useScroll()
   return <div className="paw-trail" aria-hidden="true">{[0, 1, 2, 3, 4, 5].map(i => <TrailPaw key={i} index={i} progress={scrollYProgress}/>)}</div>
 }
-export function CardPeeker() {
+export function CardPeeker({ species = 'dog' }: { species?: Species }) {
   const calm = useCalm(), { scrollY } = useScroll()
   const peek = useTransform(scrollY, [0, 180, 360, 600], [48, 48, 0, 25])
-  return <div className="card-peeker" aria-hidden="true"><motion.div style={{ y: calm ? 18 : peek }}><Mascot small/></motion.div></div>
+  return <div className="card-peeker" aria-hidden="true"><motion.div style={{ y: calm ? 18 : peek }}><Mascot small species={species}/></motion.div></div>
 }
 function TrailPaw({ index, progress }: { index: number; progress: MotionValue<number> }) {
   const opacity = useTransform(progress, [index / 7, (index + 1) / 7], [.15, 1])
@@ -148,15 +148,15 @@ export function Companion({ name, species, line, subtitles, reaction, speaking, 
   </div>
 }
 
-export function TreatTray({ onFeed, onToy }: { onFeed: () => void; onToy: () => void }) {
+export function TreatTray({ petName = 'your pet', onFeed, onToy }: { petName?: string; onFeed: () => void; onToy: () => void }) {
   const calm = useCalm()
-  return <><div className="tray treat-tray"><span className="tray-icon"><Bone/></span><span><strong>Treat tray</strong><small>Drag to your pet, or tap</small></span><div className="treats">{[0, 1, 2].map(i => <motion.button key={i} className="treat-piece" aria-label={`Give your pet treat ${i + 1}`} drag={!calm} dragSnapToOrigin dragElastic={.12} style={{ zIndex: 30 }} whileDrag={{ scale: 1.15 }} onClick={onFeed} onDragEnd={(_event, info) => { const r = document.querySelector('[data-pet-drop]')?.getBoundingClientRect(); if (r && info.point.x >= r.left && info.point.x <= r.right && info.point.y - window.scrollY >= r.top && info.point.y - window.scrollY <= r.bottom) onFeed() }}><Bone size={23}/></motion.button>)}</div></div><div className="tray toy-tray"><span className="tray-icon"><Ball/></span><span><strong>Toy box</strong><small>A little joy break</small></span><motion.button className="toy-piece" aria-label="Play fetch" onClick={onToy} whileHover={calm ? undefined : { y: [0, -7, 0] }} transition={{ duration: .36 }}><Ball size={27}/></motion.button></div></>
+  return <><div className="tray treat-tray"><span className="tray-icon"><Bone/></span><span><strong>Treat tray</strong><small>Drag to your pet, or tap</small></span><div className="treats">{[0, 1, 2].map(i => <motion.button key={i} className="treat-piece" aria-label={`Give ${petName} treat ${i + 1}`} drag={!calm} dragSnapToOrigin dragElastic={.12} style={{ zIndex: 30 }} whileDrag={{ scale: 1.15 }} onClick={onFeed} onDragEnd={(_event, info) => { const r = document.querySelector('[data-pet-drop]')?.getBoundingClientRect(); if (r && info.point.x >= r.left && info.point.x <= r.right && info.point.y - window.scrollY >= r.top && info.point.y - window.scrollY <= r.bottom) onFeed() }}><Bone size={23}/></motion.button>)}</div></div><div className="tray toy-tray"><span className="tray-icon"><Ball/></span><span><strong>Toy box</strong><small>A little joy break</small></span><motion.button className="toy-piece" aria-label={`Play fetch with ${petName}`} onClick={onToy} whileHover={calm ? undefined : { y: [0, -7, 0] }} transition={{ duration: .36 }}><Ball size={27}/></motion.button></div></>
 }
 
-export function PeekScene({ run, petName = 'Your pet', species = 'dog' }: { run?: RunState; petName?: string; species?: Species }) {
+export function PeekScene({ run, petName = 'Your pet', species = 'dog', hasPet = true }: { run?: RunState; petName?: string; species?: Species; hasPet?: boolean }) {
   const working = run?.status === 'running' || run?.status === 'queued', success = run?.status === 'complete'
   const papers = Math.min(5, run?.events.filter(e => e.type === 'tool.end').length ?? 0)
-  return <div className={`peek-scene ${working ? 'working' : ''} ${success ? 'succeeded' : ''} ${run?.status === 'error' ? 'sheepish' : ''}`}><div className="peek-vignette" aria-hidden="true"><div className="peek-mascot"><Mascot small species={species} sleepy={!run || run.status === 'error'}/></div><div className="paper-pile">{Array.from({ length: papers || 1 }, (_, i) => <motion.i key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: -i * 5, rotate: i % 2 ? 5 : -4 }} transition={{ duration: .24 }}/>)}</div><span className="dust-puff"/><span className="dust-puff second"/></div><span className="peek-copy"><strong>{working ? `${petName} is on it` : success ? 'Fetched with love.' : run?.status === 'error' ? 'A little ruffled.' : run?.status === 'approval' ? 'A paw of approval?' : 'Run log is ready'}</strong><small>{working ? 'A little busywork, off your plate.' : run?.status === 'error' ? 'Open the log. We\u2019ll untangle it.' : 'Click to see recent errands'}</small></span></div>
+  return <div className={`peek-scene ${working ? 'working' : ''} ${success ? 'succeeded' : ''} ${run?.status === 'error' ? 'sheepish' : ''}`}><div className="peek-vignette" aria-hidden="true"><div className="peek-mascot">{hasPet ? <Mascot small species={species} sleepy={!run || run.status === 'error'}/> : <div className="peek-symbol-disc"><PawPrint size={26}/></div>}</div><div className="paper-pile">{Array.from({ length: papers || 1 }, (_, i) => <motion.i key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: -i * 5, rotate: i % 2 ? 5 : -4 }} transition={{ duration: .24 }}/>)}</div><span className="dust-puff"/><span className="dust-puff second"/></div><span className="peek-copy"><strong>{hasPet ? (working ? `${petName} is on it` : success ? 'Fetched with love.' : run?.status === 'error' ? 'A little ruffled.' : run?.status === 'approval' ? 'A paw of approval?' : 'Run log is ready') : 'No companion yet'}</strong><small>{hasPet ? (working ? 'A little busywork, off your plate.' : run?.status === 'error' ? 'Open the log. We\u2019ll untangle it.' : 'Click to see recent errands') : 'Add a pet to start running errands'}</small></span></div>
 }
 
 export function Waveform({ active }: { active: boolean }) {

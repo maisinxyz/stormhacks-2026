@@ -1,4 +1,4 @@
-export type Species = 'dog' | 'cat' | 'rodent' | 'bird'
+export type Species = 'dog' | 'cat'
 export type Mode = 'work' | 'play'
 export type Mood = 'neutral' | 'eager' | 'focused' | 'proud' | 'sheepish' | 'exhausted' | 'worried' | 'smug' | 'sleepy'
 export type LocalIntent = 'sit' | 'stay' | 'come' | 'speak' | 'roll_over' | 'spin' | 'play_dead' | 'shake' | 'fetch_ball' | 'sleep' | 'wake' | 'trick' | 'dance' | 'hide' | 'stop'

@@ -99,14 +99,14 @@ test('mobile and reduced motion retain usable controls without overflow', async 
 })
 
 test('Play preserves the room destination', async ({ page }) => {
-  await page.route('**/camera.html?pet=demo-parrot', route => route.fulfill({ body: '<h1>Room destination</h1>', contentType: 'text/html' }))
+  await page.route('**/camera.html?pet=demo-dog', route => route.fulfill({ body: '<h1>Room destination</h1>', contentType: 'text/html' }))
   await page.getByRole('button', { name: 'Play', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Opening play room' })).toBeVisible()
-  await expect(page).toHaveURL(/:5174\/camera.html\?pet=demo-parrot/)
+  await expect(page).toHaveURL(/:5174\/camera.html\?pet=demo-dog/)
 })
 
 test('creation entry and server-synced pet switching survive the merge', async ({ page }) => {
-  const pet = { id: 'demo-parrot', name: 'Pip', species: 'bird', splatUrl: '', rigUrl: '', weightsUrl: '', thumbnailUrl: '', personality: { eager: .8, sassy: .3, anxious: .2, chatty: .9 }, stats: { energy: 80, happiness: 90, hunger: 10 }, createdAt: new Date().toISOString() }
+  const pet = { id: 'demo-dog', name: 'Biscuit', species: 'dog', splatUrl: '', rigUrl: '', weightsUrl: '', thumbnailUrl: '', personality: { eager: .8, sassy: .3, anxious: .2, chatty: .9 }, stats: { energy: 80, happiness: 90, hunger: 10 }, createdAt: new Date().toISOString() }
   await page.route('**/session', route => route.fulfill({ json: { activePetId: pet.id } }))
   await page.route('**/pets', route => route.fulfill({ json: [pet, { ...pet, id: 'miso', name: 'Miso', species: 'cat' }] }))
   await page.reload()
@@ -120,14 +120,14 @@ test('creation entry and server-synced pet switching survive the merge', async (
   await page.getByRole('option', { name: /Miso/ }).click()
   await expect(page.locator('.pet-nameplate')).toContainText('Miso')
   await page.locator('.pet-switcher').click()
-  await page.getByRole('option', { name: /Pip/ }).click()
-  await expect(page.locator('.pet-nameplate')).toContainText('Pip')
+  await page.getByRole('option', { name: /Biscuit/ }).click()
+  await expect(page.locator('.pet-nameplate')).toContainText('Biscuit')
 })
 
 test('a failed errand shows the sheepish error state', async ({ page }) => {
   await page.route('**/agent/run', route => route.fulfill({ json: { runId: 'test-error' } }))
   await page.route('**/agent/runs/test-error/events', route => route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"run.error","code":"rate_limited","message":"Try again soon"}\n\n' }))
-  await page.getByRole('textbox', { name: 'Command Pip' }).fill('find my file')
+  await page.getByRole('textbox', { name: 'Command Biscuit' }).fill('find my file')
   await page.getByRole('button', { name: 'Send command' }).click()
   await expect(page.locator('.run-time')).toHaveText('error')
   await page.keyboard.press('Escape')

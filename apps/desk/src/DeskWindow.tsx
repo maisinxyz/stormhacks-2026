@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
 import { animate, motion, useAnimationControls, useDragControls, useInView, useMotionValue, type PanInfo } from 'motion/react'
-import { ChevronDown, ExternalLink, FileText, Inbox, MoreHorizontal } from './icons'
+import { ChevronDown, ExternalLink, FileText, Inbox, MoreHorizontal, PawPrint } from './icons'
 import { CardPeeker, Mascot } from './DeskLife'
 import { platformsChanged, spring, useCalm } from './motion'
-import type { Mode, PlatformRect } from './contracts'
+import type { Mode, PlatformRect, Species } from './contracts'
 
 export type DeskRect = PlatformRect & { zIndex?: number }
-export function DeskWindow({ id, title, eyebrow, Icon, className, rect, zIndex, active, onActivate, onRectChange, mode }: { id: string; title: string; eyebrow: string; Icon: typeof Inbox; className: string; rect: DeskRect; zIndex: number; active: boolean; onActivate: () => void; onRectChange: (rect: Partial<DeskRect>) => void; mode: Mode }) {
+export function DeskWindow({ id, title, eyebrow, Icon, className, rect, zIndex, active, onActivate, onRectChange, mode, hasPet = false, species = 'dog' }: { id: string; title: string; eyebrow: string; Icon: typeof Inbox; className: string; rect: DeskRect; zIndex: number; active: boolean; onActivate: () => void; onRectChange: (rect: Partial<DeskRect>) => void; mode: Mode; hasPet?: boolean; species?: Species }) {
   const calm = useCalm(), ref = useRef<HTMLElement>(null), visible = useInView(ref, { once: true, amount: .15 })
   const [worldWidth, setWorldWidth] = useState(900), [empty, setEmpty] = useState(false), [menu, setMenu] = useState(false), [dragging, setDragging] = useState(false)
   const controls = useAnimationControls(), dragControls = useDragControls(), x = useMotionValue(0), y = useMotionValue(0)
@@ -69,13 +69,13 @@ export function DeskWindow({ id, title, eyebrow, Icon, className, rect, zIndex, 
     setSettlement(v => v + 1)
   }
   return <motion.article ref={ref} data-platform-id={id} data-platform-moving={calm ? 'false' : 'true'} className={`desk-window ${className} ${active ? 'active' : ''} ${mode === 'play' ? 'dimmed' : ''} ${dragging ? 'dragging' : ''}`} style={{ left, top, width, height: rect.h, zIndex: dragging ? 20 : zIndex, x, y }} initial={calm ? false : { opacity: 0, y: -22 }} animate={controls} drag dragListener={false} dragControls={dragControls} dragMomentum={false} dragElastic={.08} onDragStart={() => { interacting.current = true; markMoving(true); setDragging(true); onActivate() }} onDragEnd={dragEnd} onClick={event => { event.stopPropagation(); onActivate() }}>
-    {id === 'calendar' && <CardPeeker/>}<div className="window-paper" aria-hidden="true"/>
+    {id === 'calendar' && hasPet && <CardPeeker species={species}/>}<div className="window-paper" aria-hidden="true"/>
     <div className="window-top"><button className="window-drag-handle" aria-label={`Move ${title}. Use arrow keys to move, Shift for larger steps.`} onKeyDown={event => keyMove(event)} onPointerDown={event => { if (!event.isPrimary || event.button !== 0) return; stopCardMotion(); markMoving(false); dragControls.start(event) }}><span className="window-icon"><Icon size={19}/></span><span><small>{eyebrow}</small><strong>{title}</strong></span><span className="drag-grip" aria-hidden="true">⠿</span></button><button className="window-menu" aria-label={`${title} menu`} aria-expanded={menu} onClick={() => setMenu(!menu)}><MoreHorizontal size={19}/></button></div>
     {menu && <div className="window-popover"><button onClick={() => { setEmpty(!empty); setMenu(false) }}>{empty ? 'Show recent items' : 'Show quiet view'}</button></div>}
-    {empty ? <div className="quiet-card"><Mascot sleepy small/><strong>{id === 'inbox' ? 'Inbox at peace.' : 'A little breathing room.'}</strong><span>{id === 'inbox' ? 'Not a peep. Enjoy the quiet.' : 'Your companion keeps watch.'}</span></div> : <>
-    {id === 'inbox' && <div tabIndex={0} className="window-body inbox-body"><div className="quiet-card"><Mascot sleepy small/><strong>Connect your inbox.</strong><span>Link Gmail in Settings and your unread mail will appear here.</span></div></div>}
-    {id === 'files' && <div tabIndex={0} className="window-body file-body"><div className="quiet-card"><Mascot sleepy small/><strong>Connect Drive.</strong><span>Link Google Drive and recent files will show up here.</span></div><div className="window-link">Open files <ExternalLink size={13}/></div></div>}
-    {id === 'calendar' && <div tabIndex={0} className="window-body calendar-body"><div className="quiet-card"><Mascot sleepy small/><strong>Connect Calendar.</strong><span>Link Google Calendar to see your day at a glance.</span></div><div className="window-link">Open calendar <ExternalLink size={13}/></div></div>}
+    {empty ? <div className="quiet-card">{hasPet ? <Mascot sleepy small species={species}/> : <div className="quiet-symbol-disc" aria-hidden="true"><PawPrint size={26}/></div>}<strong>{id === 'inbox' ? 'Inbox at peace.' : 'A little breathing room.'}</strong><span>{id === 'inbox' ? 'Not a peep. Enjoy the quiet.' : hasPet ? 'Your companion keeps watch.' : 'No companion yet.'}</span></div> : <>
+    {id === 'inbox' && <div tabIndex={0} className="window-body inbox-body"><div className="quiet-card">{hasPet ? <Mascot sleepy small species={species}/> : <div className="quiet-symbol-disc" aria-hidden="true"><PawPrint size={26}/></div>}<strong>Connect your inbox.</strong><span>Link Gmail in Settings and your unread mail will appear here.</span></div></div>}
+    {id === 'files' && <div tabIndex={0} className="window-body file-body"><div className="quiet-card">{hasPet ? <Mascot sleepy small species={species}/> : <div className="quiet-symbol-disc" aria-hidden="true"><PawPrint size={26}/></div>}<strong>Connect Drive.</strong><span>Link Google Drive and recent files will show up here.</span></div><div className="window-link">Open files <ExternalLink size={13}/></div></div>}
+    {id === 'calendar' && <div tabIndex={0} className="window-body calendar-body"><div className="quiet-card">{hasPet ? <Mascot sleepy small species={species}/> : <div className="quiet-symbol-disc" aria-hidden="true"><PawPrint size={26}/></div>}<strong>Connect Calendar.</strong><span>Link Google Calendar to see your day at a glance.</span></div><div className="window-link">Open calendar <ExternalLink size={13}/></div></div>}
     </>}
     <button className="window-resize" aria-label={`Resize ${title}`} onKeyDown={event => keyMove(event, true)} onPointerDown={startResize} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize}>⌟</button>
   </motion.article>
