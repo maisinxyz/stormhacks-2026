@@ -65,6 +65,8 @@ export class RoomHud {
     const use = this.el.querySelector('[data-action="use"]');
     if (use) use.textContent = id === 'hand' ? 'Pet' : id === 'food' ? 'Feed' : 'Throw';
   }
+  /** The crosshair is on something the main button will act on. */
+  aim(on: boolean) { this.q('.room-cross').classList.toggle('hot', on); }
   /** Throw power 0..1 under the crosshair (0 hides it). */
   charge(v: number) { const c = this.q('.room-charge'); c.classList.toggle('on', v > 0); (c.firstElementChild as HTMLElement).style.width = `${Math.round(v * 100)}%`; }
   /** Happiness 0..100 as five hearts. */

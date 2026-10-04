@@ -37,6 +37,8 @@ export interface RoomScene {
   colliders: RoomCollider[];
   /** Extra obstacles for the player only (the dog walks under or through these). */
   playerColliders: RoomCollider[];
+  /** The tunnel's box (one of `colliders`): lifted while the pet runs through it. */
+  tunnelCollider: RoomCollider;
   update(dt: number): void;
   dispose(): void;
 }
@@ -78,6 +80,7 @@ export function createRoomScene(_low = false): RoomScene {
     m.rotation.x = -Math.PI / 2; m.scale.set(w / 2, d / 2, 1);
   };
   const colliders: RoomCollider[] = [], playerColliders: RoomCollider[] = [];
+  let tunnelBox!: RoomCollider;
   const solid = (x: number, z: number, w: number, d: number, list = colliders) => list.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
 
   // ---------- shell ----------
@@ -85,13 +88,15 @@ export function createRoomScene(_low = false): RoomScene {
   floor.rotation.x = -Math.PI / 2;
   box([R.width, 0.08, R.depth], new THREE.MeshBasicMaterial({ color: PAL.ceiling }), [0, R.height + 0.04, 0]);
   const W = S.window, sideW = (R.width - W.width) / 2, topH = R.height - W.sill - W.height, zb = -R.depth / 2, zf = R.depth / 2;
-  for (const s of [-1, 1]) box([sideW, R.height, R.wall], PAL.wall, [s * (W.width / 2 + sideW / 2), R.height / 2, zb]);
-  box([W.width, W.sill, R.wall], PAL.wall, [0, W.sill / 2, zb]);
-  box([W.width, topH, R.wall], PAL.wall, [0, W.sill + W.height + topH / 2, zb]);
-  for (const s of [-1, 1]) box([R.wall, R.height, R.depth], PAL.wall, [s * R.width / 2, R.height / 2, 0]);
+  // walls are flat colour (no light bands): the long walls a shade deeper than the end walls, so corners still read
+  const wall = new THREE.MeshBasicMaterial({ color: PAL.wall }), sideWall = new THREE.MeshBasicMaterial({ color: 0xffdf90 });
+  for (const s of [-1, 1]) box([sideW, R.height, R.wall], wall, [s * (W.width / 2 + sideW / 2), R.height / 2, zb]);
+  box([W.width, W.sill, R.wall], wall, [0, W.sill / 2, zb]);
+  box([W.width, topH, R.wall], wall, [0, W.sill + W.height + topH / 2, zb]);
+  for (const s of [-1, 1]) box([R.wall, R.height, R.depth], sideWall, [s * R.width / 2, R.height / 2, 0]);
   const D = S.door, doorSide = (R.width - D.width) / 2;
-  for (const s of [-1, 1]) box([doorSide, R.height, R.wall], PAL.wall, [s * (D.width + doorSide) / 2, R.height / 2, zf]);
-  box([D.width, R.height - D.height, R.wall], PAL.wall, [0, D.height + (R.height - D.height) / 2, zf]);
+  for (const s of [-1, 1]) box([doorSide, R.height, R.wall], wall, [s * (D.width + doorSide) / 2, R.height / 2, zf]);
+  box([D.width, R.height - D.height, R.wall], wall, [0, D.height + (R.height - D.height) / 2, zf]);
   // chunky baseboards
   box([R.width, 0.16, 0.05], PAL.trim, [0, 0.08, zb + 0.09]); box([R.width, 0.16, 0.05], PAL.trim, [0, 0.08, zf - 0.09]);
   for (const s of [-1, 1]) box([0.05, 0.16, R.depth], PAL.trim, [s * (R.width / 2 - 0.09), 0.08, 0]);
@@ -226,6 +231,7 @@ export function createRoomScene(_low = false): RoomScene {
     for (const dx of [-length / 2, 0, length / 2]) put(flat(new THREE.TorusGeometry(radius + 0.02, 0.045, 5, 8)), PAL.deepBlue, [x + dx, radius - 0.04, z]).rotation.y = Math.PI / 2;
     shadow(x, z, length + 0.2, radius * 2.2);
     solid(x, z, length, radius * 2);
+    tunnelBox = colliders[colliders.length - 1];
   }
 
   // ---------- wobbly plants ----------
@@ -251,7 +257,7 @@ export function createRoomScene(_low = false): RoomScene {
 
   let t = 0;
   return {
-    scene, colliders, playerColliders,
+    scene, colliders, playerColliders, tunnelCollider: tunnelBox,
     update: (dt: number) => {
       t += dt;
       plants.forEach((p, i) => { p.rotation.z = Math.sin(t * 1.1 + i * 2) * 0.05; p.rotation.x = Math.cos(t * 0.9 + i) * 0.035; });

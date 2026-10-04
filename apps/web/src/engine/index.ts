@@ -454,6 +454,8 @@ export class Engine implements PetEngine {
   carryPoint() { return this.beh && this.splat?.mesh.visible ? this.socketWorld() : undefined; }
   /** A game was played with the pet (fetch, hoop): happiness up, a little energy spent. */
   played(amount = 3) { this.needs?.played(amount); }
+  /** The pet was stroked (first-person room: a click on it with an empty hand). */
+  petted() { this.needs?.petted(1, 0.6); }
 
   private syncToyPlatforms() {
     if (!this.toys || !this.renderer) return;

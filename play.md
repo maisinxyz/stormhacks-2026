@@ -386,6 +386,17 @@ New pieces for A: a screen-to-floor raycast for drags (ground plane), picking th
 
 ---
 
+### A.x As built: first-person playroom (replaces the orbit view)
+
+The room is now a first-person toy playroom (`play/scene.ts`, `play/room/*`). The pet is an NPC: it keeps its own idle life and spots, and its model is untouched.
+
+- **Look:** low-poly, toon-shaded, sunny pastel. Same 11 x 8 m shell and the engine's walkable area; props follow the pet's needs: tent bed (sleep), bowls and treat jars (hunger), toy chest and rug (play), agility hoop and tunnel (exercise).
+- **Controls:** laptop: click to capture the mouse, mouse looks, WASD walks (Shift runs), Esc lets go; drag-look if the capture is refused. Phone: left thumb stick, right-side drag to look, round action button.
+- **Hotbar (1-4):** Hand, Ball, Frisbee, Food. Hold the button to charge a throw; the pet fetches the toy, carries it back and it returns to the hand. Food is handed over from within about 2 m (crosshair on the pet); holding food makes the pet come and beg. An empty hand on the pet strokes it; an empty hand on the hoop or tunnel sends the pet through.
+- **Voice:** the same 19 commands as the camera view (`play/tricks.ts` is shared). T or the mic button toggles the mic. "Follow me" follows the player. Sit and lie down last 8 s here.
+- **HUD:** hearts = the real happiness stat; counters = fetches and tricks.
+- **Self-check:** `/camera.html?accept=room` (about 40 s, results in `window.__acceptRoom`). It drives the room's own entry points, so pointer lock, the real microphone, phone touch input and phone frame rate are not covered.
+
 ## PART B: SNAPCHAT-STYLE CAMERA (Person B)
 
 **Goal:** the camera is the environment and the dog is the subject. The rear camera fills the screen and the personalized 3D dog stands directly in the live view, spatially anchored and visibly alive, with minimal controls. The user should think *"I'm looking through my phone camera and my dog is here."*

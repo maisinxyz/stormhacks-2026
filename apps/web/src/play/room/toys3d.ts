@@ -13,6 +13,8 @@ type Phase = 'held' | 'flying' | 'fetching' | 'carried' | 'dropped';
 const R = { ball: 0.085, frisbee: 0.1 };       // collision radius
 const BOX_H = 0.8, FETCH_LIMIT = 12, RETURN_SECS = 0.8;
 const CHARGE_MS = 900;
+const FLOOR_X = 4.0, FLOOR_Z = 2.7;   // a resting toy is moved inside this area: the pet's body keeps it this far from the walls
+const GRAB = 0.9, GIVE = 1.8;         // the pet picks the toy up from this close, and hands it over this close to the player
 
 export class Toys3D {
   /** A fetch was completed (the pet brought the toy back). */
@@ -20,6 +22,7 @@ export class Toys3D {
   /** Sound / feedback hooks. */
   onThrow?: (kind: ToyKind) => void; onBounce?: (speed: number) => void;
   private mesh: Record<ToyKind, THREE.Object3D>;
+  private food: THREE.Object3D;
   private kind: ToyKind = 'ball';
   private phase: Phase = 'held';
   private vel = new THREE.Vector3(); private restT = 0; private t = 0;
@@ -39,6 +42,11 @@ export class Toys3D {
     frisbee.add(new THREE.Mesh(flat(new THREE.CylinderGeometry(0.17, 0.19, 0.03, 10)), toon(0xff5d5d)));
     const hub = new THREE.Mesh(flat(new THREE.CylinderGeometry(0.08, 0.08, 0.034, 8)), toon(0xffffff)); frisbee.add(hub);
     this.mesh = { ball, frisbee };
+    // the treat in the player's hand: a little bone
+    const food = this.food = new THREE.Group(), boneMat = toon(0xfff1d6);
+    const shaft = new THREE.Mesh(flat(new THREE.CylinderGeometry(0.022, 0.022, 0.16, 6)), boneMat); shaft.rotation.z = Math.PI / 2; food.add(shaft);
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) { const knob = new THREE.Mesh(flat(new THREE.IcosahedronGeometry(0.034, 0)), boneMat); knob.position.set(sx * 0.085, sy * 0.022, 0); food.add(knob); }
+    food.visible = false; scene.add(food);
     for (const m of Object.values(this.mesh)) { m.visible = false; scene.add(m); }
   }
 
@@ -51,7 +59,9 @@ export class Toys3D {
   get state() { return { phase: this.phase, kind: this.kind, position: this.mesh[this.kind].position.clone() }; }
 
   /** Show `kind` in the player's hand (undefined: the hand holds something else). Called every frame with the camera. */
-  hold(kind: ToyKind | undefined, camera: THREE.Camera) {
+  hold(kind: ToyKind | 'food' | undefined, camera: THREE.Camera) {
+    this.food.visible = kind === 'food';
+    if (this.food.visible) { this.food.position.set(0.28, -0.24, -0.66).applyMatrix4(camera.matrixWorld); this.food.quaternion.copy(camera.quaternion); this.food.rotateZ(0.5); }
     for (const k of ['ball', 'frisbee'] as const) {
       const m = this.mesh[k];
       if (this.phase !== 'held' && k === this.kind) continue; // it is out in the room
@@ -94,6 +104,10 @@ export class Toys3D {
       const c = e.carryPoint();
       if (c) m.position.copy(c); else { const p = e.petPosition; m.position.set(p.x, 0.3 * e.scaleNow, p.z); }
     }
+    // a big pet cannot stand exactly on the toy (or exactly at the player's feet): close enough counts
+    const pp = e.petPosition, pl0 = this.player();
+    if (this.phase === 'fetching' && Math.hypot(pp.x - m.position.x, pp.z - m.position.z) < GRAB) this.next = 'pickup';
+    if (this.phase === 'carried' && this.t > 0.3 && Math.hypot(pp.x - pl0.x, pp.z - pl0.z) < GIVE) this.next = 'drop';
     if (this.next === 'pickup') {
       this.next = undefined; this.phase = 'carried'; this.t = 0;
       const pl = this.player(), p = e.petPosition, d = new THREE.Vector3(p.x - pl.x, 0, p.z - pl.z);
@@ -115,13 +129,13 @@ export class Toys3D {
   /** The toy stopped: make sure the pet can reach the spot, then send it. */
   private settle() {
     const m = this.mesh[this.kind], r = 0.4;
-    let x = THREE.MathUtils.clamp(m.position.x, -4.3, 4.3), z = THREE.MathUtils.clamp(m.position.z, -3.0, 3.0);
+    let x = THREE.MathUtils.clamp(m.position.x, -FLOOR_X, FLOOR_X), z = THREE.MathUtils.clamp(m.position.z, -FLOOR_Z, FLOOR_Z);
     for (const c of this.colliders) { // out of (and a pet's width away from) every furniture box
       if (x < c.minX - r || x > c.maxX + r || z < c.minZ - r || z > c.maxZ + r) continue;
       const sides = [x - (c.minX - r), (c.maxX + r) - x, z - (c.minZ - r), (c.maxZ + r) - z], i = sides.indexOf(Math.min(...sides));
       if (i === 0) x = c.minX - r; else if (i === 1) x = c.maxX + r; else if (i === 2) z = c.minZ - r; else z = c.maxZ + r;
     }
-    m.position.set(THREE.MathUtils.clamp(x, -4.3, 4.3), R[this.kind], THREE.MathUtils.clamp(z, -3.0, 3.0));
+    m.position.set(THREE.MathUtils.clamp(x, -FLOOR_X, FLOOR_X), R[this.kind], THREE.MathUtils.clamp(z, -FLOOR_Z, FLOOR_Z));
     m.rotation.set(0, m.rotation.y, 0);
     this.vel.set(0, 0, 0);
     this.phase = 'fetching'; this.t = 0;
