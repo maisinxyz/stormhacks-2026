@@ -190,7 +190,16 @@ kbd { font: 700 10px var(--font-text); color: #485c46; padding: 4px 6px; border-
 .in-view .mascot-eyes, .in-view .pip-eyes { animation: pip-blink 6.8s infinite; }
 .in-view .mascot-wing, .in-view .pip-wing { animation: wing-flick 8s ease-in-out infinite; }
 .in-view .mascot-tail, .in-view .pip-tail { animation: tail-flick 9s ease-in-out infinite; }
-.pet-perch { height: 6px; width: 136px; margin: -17px auto 0; position: relative; background: #b29c72; border-radius: 50%; box-shadow: 0 5px 0 #aab78730; }
+.pet-perch, .pet-mat { height: 10px; width: 144px; margin: -10px auto 0; position: relative; background: #e3dbc9; border-radius: 50%; box-shadow: 0 4px 10px rgba(45, 60, 48, 0.08); border: 1px dashed #cbbea5; }
+.pet-placeholder--symbol { width: 150px; height: 160px; margin: 36px auto 14px; display: grid; place-items: center; position: relative; }
+.empty-symbol-disc { width: 124px; height: 124px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fffdf4, #e4eccd 72%); border: 2px dashed #b7c897; display: grid; place-items: center; box-shadow: 0 14px 32px rgba(35, 55, 45, 0.09), inset 0 2px 6px rgba(255, 255, 255, 0.85); position: relative; animation: float 4s ease-in-out infinite; }
+.empty-paw-icon { color: #536f4b; opacity: .85; }
+.empty-sparkle-orbit { position: absolute; inset: -8px; pointer-events: none; }
+.sparkle-dot { position: absolute; color: #d2a138; font-size: 17px; line-height: 1; }
+.sparkle-dot.dot-1 { top: 4px; right: 10px; animation: pulse-sparkle 2.4s ease-in-out infinite; }
+.sparkle-dot.dot-2 { bottom: 8px; left: 10px; animation: pulse-sparkle 2.4s ease-in-out infinite 1.2s; }
+@keyframes pulse-sparkle { 0%, 100% { transform: scale(0.85); opacity: 0.45; } 50% { transform: scale(1.25); opacity: 1; } }
+.pet-nameplate--empty { background: #eef2e1; border-color: #cbdbb8; color: #62755c; }
 .pet-orbit { position: absolute; inset: 38px -25px 38px; border: 1px dashed #b1be8666; border-radius: 50%; transform: rotate(-20deg); pointer-events: none; }
 .pet-orbit > svg { position: absolute; right: 9px; top: 43px; color: #748b44; }
 .pet-orbit > span { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: #c09f61; left: 10px; top: 88px; }

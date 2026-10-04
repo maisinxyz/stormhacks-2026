@@ -4,13 +4,13 @@ import type { PetBundle } from '../contracts'
 import '../create/create.css'
 import type { PetSync, ServerStatus } from './usePetSync'
 
-const speciesLabel: Record<PetBundle['species'], string> = { dog: 'Dog', cat: 'Cat', rodent: 'Rodent', bird: 'Bird' }
-const glyph: Record<PetBundle['species'], string> = { dog: '◕ᴥ◕', cat: '◡ᴗ◡', rodent: '•ᴥ•', bird: '✦' }
+const speciesLabel: Record<string, string> = { dog: 'Dog', cat: 'Cat' }
+const glyph: Record<string, string> = { dog: '◕ᴥ◕', cat: '◡ᴗ◡' }
 
 export function PetAvatar({ pet, size = 32 }: { pet: PetBundle | null; size?: number }) {
   const [broken, setBroken] = useState(false)
   if (pet?.thumbnailUrl && !broken) return <img className="pet-avatar pet-thumb" src={pet.thumbnailUrl} alt="" width={size} height={size} onError={() => setBroken(true)} />
-  return <span className={`pet-avatar ${pet?.species ?? 'dog'}-avatar`} style={{ fontSize: size > 30 ? 13 : 10 }} aria-hidden="true">{pet ? glyph[pet.species] : '+'}</span>
+  return <span className={`pet-avatar ${pet?.species ?? 'dog'}-avatar`} style={{ fontSize: size > 30 ? 13 : 10 }} aria-hidden="true">{pet ? (glyph[pet.species] ?? '🐾') : '🐾'}</span>
 }
 
 export function PetSwitcher({ pets, activePet, sync, onCreate }: { pets: PetBundle[]; activePet: PetBundle | null; sync: PetSync; onCreate: () => void }) {
