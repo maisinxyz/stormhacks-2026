@@ -43,9 +43,16 @@ export async function run(shell: PlayShell) {
     const n0 = room.fetches;
     room.primary(true); await sleep(600); room.primary(false);
     await sleep(150); const flew = room.toys.state.phase === 'flying';
-    const back = await until(() => room.fetches > n0, 14000);
+    // while it carries the toy back, the pet must face the way it is running (not run backwards or sideways)
+    const off: number[] = []; let prev = pet();
+    const back = await until(() => {
+      const p = pet(), dx = p.x - prev.x, dz = p.z - prev.z; prev = p;
+      if (room.toys.state.phase === 'carried' && Math.hypot(dx, dz) > 0.02) { const d = Math.atan2(dx, dz) - e.splat.mesh.rotation.y; off.push(Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) * 180 / Math.PI); }
+      return room.fetches > n0;
+    }, 14000);
+    const facing = off.length ? off.slice().sort((x, y) => x - y)[off.length >> 1] : 0;
     const p = room.toys.state.position, inRoom = Math.abs(p.x) < 5.5 && Math.abs(p.z) < 4;
-    add(`fetch-${kind}`, flew && back && inRoom && gap() < 1.9, `flew ${flew}, brought back ${back}, pet ${gap().toFixed(2)} m from the player, toy inside the room ${inRoom}`);
+    add(`fetch-${kind}`, flew && back && inRoom && gap() < 1.9 && facing < 25, `flew ${flew}, brought back ${back}, pet ${gap().toFixed(2)} m from the player, toy inside the room ${inRoom}, facing ${facing.toFixed(0)} deg off its direction of travel on the way back (median of ${off.length} samples)`);
     await until(() => room.toys.state.phase === 'held', 2000);
   }
 

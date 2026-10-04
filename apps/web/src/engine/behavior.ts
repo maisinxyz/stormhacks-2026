@@ -161,10 +161,10 @@ export class Behavior {
     this.needs.tick(dt, this.state === 'sleep' ? 'sleep' : this.moving ? (this.fast ? 'run' : 'walk') : 'rest');
     const mood = MOODS[this.mood];
     const pose = applyMood(this.anim.update(dt * mood.speed * this.speedBias), this.mood);
-    // face travel direction; idle poses are 3/4 view toward the camera
-    const target = this.moving ? this.dir * Math.PI / 2 : this.faceYaw ?? this.dir * 0.7;
+    // face travel direction (the real heading when walking in depth, else left/right on the 2D stage); idle poses are 3/4 view toward the camera
+    const target = this.moving ? this.travelYaw ?? this.dir * Math.PI / 2 : this.faceYaw ?? this.dir * 0.7;
     this.yaw += Math.atan2(Math.sin(target - this.yaw), Math.cos(target - this.yaw)) * Math.min(1, dt * 8); // shortest way round
-    this.moving = false;
+    this.moving = false; this.travelYaw = undefined;
     this.y += ((this.targetY - this.y)) * Math.min(1, dt * (this.landing ? 3 : 10));
     return { pose, x: this.x, y: this.y + (pose.y ?? 0), z: this.z, yaw: this.yaw + (pose.yaw ?? 0) };
   }
@@ -172,6 +172,8 @@ export class Behavior {
   // ---------- internals ----------
   private targetY = 0;
   private moving = false;
+  /** Heading of the current walk step (set each frame by walkTo); the one place that turns the body. */
+  private travelYaw?: number;
   private speedBias = 1;
 
   private start(r: Routine, s: State) {
@@ -210,7 +212,7 @@ export class Behavior {
       const dx = x - this.x, dz = targetZ - this.z, distance = Math.hypot(dx, dz);
       this.dir = dx >= 0 ? 1 : -1;
       this.moving = true;
-      if (distance > 0.001) { const step = Math.min(distance, spd * dt); this.x += dx / distance * step; this.z += dz / distance * step; this.yaw += (Math.atan2(dx, dz) - this.yaw) * Math.min(1, dt * 8); }
+      if (distance > 0.001) { const step = Math.min(distance, spd * dt); this.x += dx / distance * step; this.z += dz / distance * step; this.travelYaw = Math.atan2(dx, dz); }
       return Math.hypot(x - this.x, targetZ - this.z) < 0.02;
     };
   }
