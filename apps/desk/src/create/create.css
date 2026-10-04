@@ -6,8 +6,9 @@
 .cp-drop.over { border-color: #9dbd39; background: #f1f7d9; }
 .cp-drop em { color: #b4462f; font-style: normal; font-size: 11px; }
 .cp-note { cursor: default; gap: 8px; }
-.cp-picked { margin-top: 14px; height: 220px; border-radius: 10px; background: #f3f5ef; border: 1px solid #dce3de; position: relative; display: grid; place-items: center; overflow: hidden; }
-.cp-picked img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.cp-picked { margin-top: 14px; height: 260px; border-radius: 10px; background: #f3f5ef; border: 1px solid #dce3de; position: relative; display: grid; place-items: center; overflow: hidden; }
+/* the whole photo, never cropped: the picture fills the box (positioned, so the grid's auto row cannot grow to the picture's own height and clip it) and `contain` letterboxes it */
+.cp-picked img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .cp-ghost { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #d8e0da; background: rgba(255,255,255,.92); color: var(--ink); border-radius: 7px; padding: 7px 10px; font-size: 11px; font-weight: 700; }
 .cp-picked .cp-ghost { position: absolute; right: 10px; bottom: 10px; }
 .cp-camera { margin-top: 14px; height: 260px; border-radius: 10px; background: #0e1b2a; position: relative; overflow: hidden; display: grid; place-items: center; }
