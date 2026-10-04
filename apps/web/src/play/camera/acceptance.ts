@@ -83,7 +83,7 @@ export async function run(shell: PlayShell) {
     for (let i = 0; i < 40; i++) { orient(15 + (Math.random() - 0.5) * 0.5, 75 + (Math.random() - 0.5) * 0.5); await sleep(25); xs.push(ndc().x); } // sensor noise
     const mean = xs.reduce((a, b) => a + b, 0) / xs.length, jitter = Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / xs.length);
     orient(55); await sleep(500); const drifted = ndc().x;
-    cam.pose.recenter(); orient(55); await sleep(600); const recentred = ndc().x;
+    cam.recenter(); orient(55); await sleep(600); await until(() => !e.travelling, 6000); await sleep(300); const recentred = ndc().x; // the Recenter control: view re-zeroed and the dog brought to the middle
     e.doIntent('wake');
     add('anchor', 'B.13-3 dog stays anchored while turning, no jitter, recenter fixes drift',
       w0.distanceTo(w1) < 0.15 && x1 - x0 > 0.2 && jitter < 0.01 && Math.abs(recentred) < 0.15 && Math.abs(drifted) > 0.5,
@@ -136,25 +136,26 @@ export async function run(shell: PlayShell) {
     const seen = new Set<string>(); const yaws: number[] = [];
     for (let i = 0; i < 60; i++) { seen.add(sample()); yaws.push(e.look.yaw); await sleep(100); }
     const yawRange = Math.max(...yaws) - Math.min(...yaws);
-    // command-only: a phone jolt, then 4.5 s out of frame, must not move the dog; a sit must hold
+    // no behaviour of its own: a phone jolt and a turn away start no routine (state stays idle). Since 6d9bf54 the body is
+    // clamped to the visible frame, so it slides to stay on screen instead of being left behind; a sit must hold
     const p0 = pos();
     for (let i = 0; i < 12; i++) { orient(55 + i * 9, 68); await sleep(16); } // ~500 deg/s jolt, ends out of frame
     await sleep(4500);
-    const moved = pos().distanceTo(p0), calm = e.state === 'idle';
+    const moved = pos().distanceTo(p0), calm = e.state === 'idle', inFrame = Math.abs(ndc().x) < 0.85;
     orient(55, 68); e.doIntent('sit'); await sleep(6000);
     const held = e.beh.anim.clip === e.pack.clips[e.pack.intents.sit] && e.state === 'intent';
     e.doIntent('stop'); await sleep(300);
     const stood = e.state === 'idle';
-    // follow: turn 60 deg -> the dog walks back in front; "stay there" -> turn back and it does not move
-    cam.pose.recenter(); orient(55, 68); await sleep(600); cam.heard('follow me'); orient(115, 68); await sleep(600);
-    await until(() => e.travelling, 2000); await until(() => !e.travelling, 9000);
-    const followed = Math.abs(ndc().x) < 0.3;
+    // follow (since 6d9bf54: the dog goes to the pointer / finger); "sit" ends it and the dog stays put
+    cam.pose.recenter(); orient(55, 68); e.placePet(0, 0, false); await sleep(600); cam.heard('follow me');
+    fire('pointermove', innerWidth * 0.25, innerHeight * 0.72); await sleep(300); await until(() => !e.travelling, 9000);
+    const followed = ndc().x < -0.2;
     cam.heard('sit'); const pStay = pos(); orient(55, 68); await sleep(3000);
     const pNow = pos(); const stayed = Math.hypot(pNow.x - pStay.x, pNow.z - pStay.z) < 0.01 && !cam.following; // xz only: sitting lowers the body
     e.doIntent('stop'); cam.pose.recenter(); e.placePet(0, 0, false); await sleep(400);
-    add('alive', 'B.13-6 never frozen; moves only on command; a pose holds until the next command',
-      seen.size > 40 && yawRange > 0.2 && moved < 0.01 && calm && held && stood && followed && stayed,
-      `${seen.size}/60 distinct poses in 6 s idle, head yaw range ${yawRange.toFixed(2)} rad, moved ${moved.toFixed(3)} m after a jolt + 4.5 s out of frame (state ${calm ? 'idle' : 'not idle'}), sit held 6 s: ${held}, "stop" stands: ${stood}, "follow me" + 60 deg turn -> back in front: ${followed}, "stay there" + turn back -> did not move: ${stayed} [synthetic sensor]`);
+    add('alive', 'B.13-6 never frozen; starts nothing by itself; stays in frame; a pose holds until the next command',
+      seen.size > 40 && yawRange > 0.2 && inFrame && calm && held && stood && followed && stayed,
+      `${seen.size}/60 distinct poses in 6 s idle, head yaw range ${yawRange.toFixed(2)} rad, after a jolt + a turn away it started no routine (state ${calm ? 'idle' : 'not idle'}) and was kept in frame: ${inFrame} (slid ${moved.toFixed(2)} m), sit held 6 s: ${held}, "stop" stands: ${stood}, "follow me" + pointer to the left -> went there: ${followed}, then "sit" -> did not move: ${stayed} [synthetic sensor]`);
 
     // side placement: clear of the user, faces the centre, swaps on command
     cam.pose.recenter(); orient(55, 68); await sleep(600); cam.side = 1; cam.placeSide(false); await sleep(500);

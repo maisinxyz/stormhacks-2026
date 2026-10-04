@@ -471,7 +471,7 @@ The existing `Interactions` window listeners keep working; Person B only needs t
 |---|---|
 | Sit | sits, faces you, tail wags; holds until the next command |
 | Come here | runs to about 1.2 m from you, woof, wags |
-| Follow me | keeps in front of you as you turn, until another command |
+| Follow me | goes to the pointer / your finger as it moves (changed in 6d9bf54; it used to keep in front of you as you turn), until another command |
 | Lie down | belly down, head on paws (new `lie` clip); holds until the next command |
 | Jump | hops, lands, woof, wags |
 | Go left / right | walks about 0.9 m across the screen, stops, looks at you |
@@ -487,6 +487,8 @@ The existing `Interactions` window listeners keep working; Person B only needs t
 | Roll over | rolls, stands |
 | Surprise me | sparkles and a random trick (never the same twice in a row) |
 | Stand up (unlisted) | "stand up", "get up", "stop": ends a held Sit or Lie down |
+
+Since 6d9bf54 the dog's body is also clamped to the visible frame every frame, so it cannot be left off-screen: turning away slides it along the edge instead of leaving it anchored in the room. Recenter brings it to the middle.
 
 The "woof" is a synthesized bark (`play/sfx.ts`, no audio files), a head jerk and a "Woof!" bubble; it plays only after the microphone has closed. Limits: English, word-level matching (no paraphrase understanding such as "make yourself comfy"); directions are screen directions, not real-world surfaces.
 

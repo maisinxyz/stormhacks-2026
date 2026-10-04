@@ -77,6 +77,14 @@ export class Toys {
     this.ball?.setLinvel({ x: vx, y: vy, z: 0 }, true);
   }
 
+  /** Keep a thrown ball inside the visible frame while preserving its physics. */
+  constrain(x: number, y: number, bounceX = false, bounceY = false) {
+    if (!this.ball) return;
+    const v = this.ball.linvel();
+    this.ball.setTranslation({ x, y, z: 0 }, true);
+    this.ball.setLinvel({ x: bounceX ? -v.x * .72 : v.x, y: bounceY ? -v.y * .72 : v.y, z: 0 }, true);
+  }
+
   /** Pet picked it up. */
   take() { this.carried = true; this.sprite.visible = false; this.ball?.setEnabled(false); }
   drop(x: number, y: number) {

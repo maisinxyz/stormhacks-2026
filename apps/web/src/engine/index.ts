@@ -95,8 +95,12 @@ export class Engine implements PetEngine {
     this.inter = new Interactions(this.interactionHost());
     canvas.style.pointerEvents = 'none';
     window.addEventListener('pointermove', e => {
-      canvas.style.pointerEvents = this.hitTest(e.clientX, e.clientY) || this.hitBall(e.clientX, e.clientY) ? 'auto' : 'none';
+      const ball = this.hitBall(e.clientX, e.clientY), pet = this.hitTest(e.clientX, e.clientY);
+      canvas.style.pointerEvents = pet || ball ? 'auto' : 'none';
+      canvas.style.cursor = ball ? 'grab' : pet ? 'pointer' : 'default';
     });
+    window.addEventListener('pointerdown', e => { if (this.hitBall(e.clientX, e.clientY)) canvas.style.cursor = 'grabbing'; }, true);
+    window.addEventListener('pointerup', () => { canvas.style.cursor = 'default'; }, true);
     let prev = 0;
     const loop = (t: number, frame?: XRFrame) => {
       const dt = t / 1000 - prev; prev = t / 1000;
@@ -105,6 +109,7 @@ export class Engine implements PetEngine {
       this.onFrame?.(t / 1000, frame);
       this.toys?.step(Math.min(dt, 0.1));
       this.inter?.update(Math.min(dt, 0.1), t);
+      this.constrainBallToFrame();
       this.updateLaser();
       this.peek?.update(Math.min(dt, 0.1));
       if (this.splat) {
@@ -158,6 +163,8 @@ export class Engine implements PetEngine {
 
   private tickBehavior(dt: number) {
     const o = this.beh!.update(dt), m = this.splat!.mesh;
+    this.constrainPetToFrame();
+    if (this.view === 'camera') { const fixed = this.beh!.snapshot(); o.x = fixed.x; o.z = fixed.z; }
     for (const b of this.bones) this.setBoneEuler(b.name, 0, 0, 0);
     for (const [n, e] of Object.entries(o.pose.bones)) this.setBoneEuler(n, e[0], e[1], e[2]);
     // behavior y (hops, carry lift) is in metres; the clip's own y offset is authored for a 1-unit pet, so scale it
@@ -179,6 +186,32 @@ export class Engine implements PetEngine {
       p.mesh.visible = m.visible;
     }
     this.applyLook(dt, o.pose.bones.head);
+  }
+
+  /** Clamp the actual animated body every frame, not just its requested target. */
+  private constrainPetToFrame() {
+    if (this.view !== 'camera' || !this.beh) return;
+    const state = this.beh.snapshot();
+    const p = new THREE.Vector3(state.x, this.groundPlane, state.z).project(this.camera);
+    const x = THREE.MathUtils.clamp(p.x, -.72, .72), y = THREE.MathUtils.clamp(p.y, -.78, .12);
+    if (Math.abs(x - p.x) < .001 && Math.abs(y - p.y) < .001) return;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(x, y), this.camera);
+    const hit = ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -this.groundPlane), new THREE.Vector3());
+    if (hit) this.beh.constrainPosition(hit.x, hit.z);
+  }
+
+  /** Screen-space safety rails for the toy. At an edge, the velocity is reflected so
+   * the ball remains physical instead of being silently teleported away. */
+  private constrainBallToFrame() {
+    if (!this.toys?.present || !this.renderer) return;
+    const b = this.toys.pos, p = new THREE.Vector3(b.x, b.y, .15).project(this.camera);
+    const x = THREE.MathUtils.clamp(p.x, -.9, .9), y = THREE.MathUtils.clamp(p.y, -.86, .82);
+    if (Math.abs(x - p.x) < .001 && Math.abs(y - p.y) < .001) return;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(x, y), this.camera);
+    const hit = ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -.15), new THREE.Vector3());
+    if (hit) this.toys.constrain(hit.x, hit.y, Math.abs(x - p.x) > .001, Math.abs(y - p.y) > .001);
   }
 
   // ---- look-at layer (play.md B.6): head turns toward a world target on top of whatever clip is playing ----
@@ -214,6 +247,12 @@ export class Engine implements PetEngine {
     if (!item || !this.feedItem(item)) return false;
     this.bus.emit({ type: 'FEED', item });
     this.beh?.react('feed');
+    const p = this.petPosition;
+    // Keep the dimensional biscuit clearly above the dog's head.
+    p.y += 1.05 * this.petScale;
+    this.props?.setWorld({ kind: 'preset', name: 'bone' }, p);
+    this.props?.burst('sparkle', p.clone().add(new THREE.Vector3(0, .08, 0)), 14);
+    window.setTimeout(() => this.props?.setWorld(undefined), 1400);
     return true;
   }
   /** Render one frame right now (capture reads the canvas back in the same task, play.md B.9). */
@@ -320,8 +359,10 @@ export class Engine implements PetEngine {
 
   private hitBall(x: number, y: number) {
     if (!this.toys?.hittable) return false;
-    const w = this.toWorld(x, y), b = this.toys.pos;
-    return !!w && Math.hypot(w.x - b.x, w.y - b.y) < 0.2;
+    const r = this.renderer.domElement.getBoundingClientRect(), b = this.toys.pos;
+    const screen = new THREE.Vector3(b.x, b.y, .15).project(this.camera);
+    const sx = r.left + (screen.x + 1) * .5 * r.width, sy = r.top + (1 - screen.y) * .5 * r.height;
+    return Math.hypot(x - sx, y - sy) < Math.max(28, Math.min(r.width, r.height) * .055);
   }
 
   /** Species food check; wrong food is ignored. Resets hunger. */
@@ -333,6 +374,8 @@ export class Engine implements PetEngine {
 
   /** F2 Toy Box: put the ball on stage (optionally with a toss). */
   spawnBall(x = -1, y = 1.2, vx = 0, vy = 0) { this.toys?.spawn(x, y); if (vx || vy) { this.toys?.release(vx, vy); this.beh?.fetchBall(); } }
+  /** Spawn the ball at the visual middle-bottom of the current screen. */
+  spawnBallAtScreen() { this.spawnBall(0, .42); }
   /** F2 treat tray (non-HTML5 drag): call on pointer-up over the canvas. */
   dropFood(item: FeedItem, x: number, y: number) { return this.inter?.dropFood(item, x, y) ?? false; }
   /** F2 POINT (screen px). */

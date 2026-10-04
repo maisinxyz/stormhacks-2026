@@ -400,6 +400,9 @@ export class Behavior {
     if (drop) this.start(this.pointRoutine(x, z), 'intent');
   }
 
+  /** Hard safety rail used by the camera view: keep the body inside the visible frame. */
+  constrainPosition(x: number, z: number) { this.x = x; this.z = z; }
+
   private *pointRoutine(x: number, z = this.z): Routine {
     yield* this.walkTo(x, z, Math.hypot(x - this.x, z - this.z) > 1.5);
     if (this.arriveDir) this.dir = this.arriveDir;

@@ -21,15 +21,21 @@ function propTexture(p: Prop): THREE.Texture {
     const c = document.createElement('canvas');
     c.width = c.height = 128;
     const x = c.getContext('2d')!;
-    x.font = '96px serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
-    x.fillText(PRESET[p.name] ?? '📦', 64, 70); // unknown preset names fall back to the box
+    if (p.name === 'bone') {
+      x.save(); x.translate(64, 64); x.rotate(-0.15); x.fillStyle = '#b9854d';
+      x.beginPath(); x.roundRect(-38, -11, 76, 22, 11); x.arc(-40, -16, 14, 0, Math.PI * 2); x.arc(-40, 16, 14, 0, Math.PI * 2); x.arc(40, -16, 14, 0, Math.PI * 2); x.arc(40, 16, 14, 0, Math.PI * 2); x.fill();
+      x.fillStyle = '#e6bd7e'; x.globalAlpha = .72; x.fillRect(-22, -5, 44, 10); x.restore();
+    } else {
+      x.font = '96px serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.fillText(PRESET[p.name] ?? '📦', 64, 70); // unknown preset names fall back to the box
+    }
     t = new THREE.CanvasTexture(c);
   }
   texCache.set(key, t);
   return t;
 }
 
-const COLORS: Record<ParticleKind, number> = { dust: 0xb9a98c, feather: 0xffffff, dirt: 0x6b4a2b, puff: 0xfff3c4, heart: 0xffffff, sparkle: 0xfff1b0 };
+const COLORS: Record<ParticleKind, number> = { dust: 0xb9a98c, feather: 0xffffff, dirt: 0x6b4a2b, puff: 0xfff3c4, heart: 0xffffff, sparkle: 0xffffff };
 const FLOATY: ParticleKind[] = ['feather', 'heart', 'sparkle']; // drift up instead of falling
 
 export function propSprite(p: Prop, size: number) {
@@ -39,9 +45,26 @@ export function propSprite(p: Prop, size: number) {
   return s;
 }
 
+/** A small dimensional biscuit for the play-room treat moment. Sprites made the
+ * treat look flat and disconnected from the dog, so this uses real geometry. */
+function boneObject(size = 1) {
+  const group = new THREE.Group();
+  const material = new THREE.MeshStandardMaterial({ color: 0xb9854d, roughness: .82, metalness: 0 });
+  const centre = new THREE.Mesh(new THREE.CapsuleGeometry(.055 * size, .34 * size, 6, 12), material);
+  centre.rotation.z = Math.PI / 2;
+  group.add(centre);
+  for (const x of [-.2, .2]) for (const y of [-.07, .07]) {
+    const end = new THREE.Mesh(new THREE.SphereGeometry(.095 * size, 14, 10), material);
+    end.position.set(x * size, y * size, 0);
+    group.add(end);
+  }
+  group.renderOrder = 10;
+  return group;
+}
+
 export class Props {
   private carry?: THREE.Sprite;
-  private world?: THREE.Sprite;
+  private world?: THREE.Object3D;
   private parts: { s: THREE.Sprite; v: THREE.Vector3; life: number; g: number }[] = [];
   private dot: THREE.Texture;
   private heart: THREE.Texture;
@@ -76,7 +99,11 @@ export class Props {
 
   setWorld(p: Prop | undefined, at?: THREE.Vector3) {
     if (this.world) { this.scene.remove(this.world); this.world = undefined; }
-    if (p && at) { this.world = this.sprite(p, 0.3); this.world.position.copy(at); }
+    if (p && at) {
+      this.world = p.name === 'bone' ? boneObject(.9) : this.sprite(p, 0.3);
+      this.world.position.copy(at);
+      this.scene.add(this.world);
+    }
   }
 
   burst(kind: ParticleKind, at: THREE.Vector3, n = 10) {
