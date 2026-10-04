@@ -8,6 +8,23 @@ import { isDevSecret, loadConfig } from './agent/config.js';
 import { requireUser, USER_COOKIE } from './auth/requireUser.js';
 import { ApiError } from './errors.js';
 
+/**
+ * Built-in demo pets the clients ship (apps/web bundles and engine/sdf/known.ts). They are never saved
+ * to the database, so agent runs for them can't go through the owner check; they have fixed profiles.
+ */
+const DEMO_NAMES: Record<string, string> = {
+  'known-dachshund': 'Frank', 'known-german-shepherd': 'Rex', 'known-rottweiler': 'Bruno', 'known-golden-retriever': 'Sunny',
+  'placeholder-dog': 'Biscuit', 'demo-dog': 'Sunny', 'demo-cat': 'Miso',
+};
+export function demoPet(petId: string) {
+  const name = DEMO_NAMES[petId];
+  if (!name) return undefined;
+  return {
+    id: petId, name, species: petId.endsWith('cat') ? 'cat' as const : 'dog' as const,
+    personality: { eager: 0.8, sassy: 0.5, anxious: 0.2, chatty: 0.5 },
+  };
+}
+
 export interface FetchAppOptions extends Omit<AppOptions, 'requireUser' | 'registerB1'> {
   b1?: Omit<B1Options, 'pets' | 'media'>;
 }
@@ -51,7 +68,7 @@ export async function buildFetchApp(options: FetchAppOptions = {}) {
               const body = req.body as { petId?: unknown } | undefined;
               // Preserve B1's mode-forbidden response before inspecting a pet or body.
               const mode = await b1!.ctx.store.getUserState(req.user.id);
-              if (mode.mode === 'work' && typeof body?.petId === 'string' && body.petId.length > 0 && body.petId.length <= 200) context.pets.getBundle(body.petId, req.user.id);
+              if (mode.mode === 'work' && typeof body?.petId === 'string' && body.petId.length > 0 && body.petId.length <= 200 && !demoPet(body.petId)) context.pets.getBundle(body.petId, req.user.id);
             }
             return userScope.run(req.user.id, () => handler.call(this, req, reply));
           };
@@ -60,6 +77,8 @@ export async function buildFetchApp(options: FetchAppOptions = {}) {
           pets: { get: async petId => {
             const userId = userScope.getStore();
             if (!userId) throw new ApiError(401, 'auth_required');
+            const demo = demoPet(petId);
+            if (demo) return demo;
             context.pets.getBundle(petId, userId);
             return context.pets.get(petId);
           } },

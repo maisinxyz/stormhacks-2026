@@ -56,7 +56,34 @@ function errorWithStatus(status: number, message: string) {
   return error;
 }
 
+/** Overload/rate-limit responses that are worth retrying (Gemini returns 503 "high demand" in spikes). */
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+const FALLBACK_MODELS = (process.env.GEMINI_FALLBACK_MODELS ?? 'gemini-3.5-flash,gemini-flash-latest').split(',').map(s => s.trim()).filter(Boolean);
+
 function geminiApiClient(apiKey?: string): GeminiClient {
+  const once = geminiOnce(apiKey);
+  return async (request, signal) => {
+    const model = (request as GeminiRequest & { model?: string }).model;
+    if (!model) throw new Error('Gemini model is not configured');
+    // Retry the configured model through short spikes, then fall through to backup models.
+    const models = [model, ...FALLBACK_MODELS.filter(m => m !== model)];
+    let last: unknown;
+    for (const [i, m] of models.entries()) {
+      for (let attempt = 0; attempt < (i === 0 ? 3 : 2); attempt++) {
+        try { return await once({ ...request, model: m } as GeminiRequest, signal); }
+        catch (err) {
+          last = err;
+          const status = (err as { status?: number }).status;
+          if (signal.aborted || (status !== undefined && !RETRYABLE.has(status))) throw err;
+          await new Promise(r => setTimeout(r, 600 * 2 ** attempt));
+        }
+      }
+    }
+    throw last;
+  };
+}
+
+function geminiOnce(apiKey?: string): GeminiClient {
   return async (request, signal) => {
     if (!apiKey) throw errorWithStatus(401, 'GEMINI_API_KEY is not configured');
     const model = (request as GeminiRequest & { model?: string }).model;

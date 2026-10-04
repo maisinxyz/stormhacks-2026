@@ -44,7 +44,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): B1Config {
       callbackUrl: env.COMPOSIO_CALLBACK_URL ?? `${env.WEB_ORIGIN ?? 'http://localhost:5173'}/?connected=app`,
     },
     gemini: { apiKey: env.GEMINI_API_KEY || undefined },
-    agentModel: env.AGENT_MODEL ?? (env.MODEL_PROVIDER === 'anthropic' ? 'claude-opus-5-5' : 'gemini-2.5-flash'),
+    agentModel: env.AGENT_MODEL ?? (env.MODEL_PROVIDER === 'anthropic' ? 'claude-opus-5-5' : 'gemini-3.8-flash'),
     toolTimeoutMs: Number(env.TOOL_TIMEOUT_MS ?? 30_000),
     maxSteps: Number(env.AGENT_MAX_STEPS ?? 15),
     approvalTtlMs: Number(env.APPROVAL_TTL_MS ?? 10 * 60_000),
