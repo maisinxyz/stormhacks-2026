@@ -5,10 +5,11 @@ import type { PlushTraits } from './sdfPet';
 
 export interface KnownDog { id: string; name: string; photo: string; traits: PlushTraits }
 
+// The photos live in the repo's top-level assets/ folder.
 export const KNOWN_DOGS: KnownDog[] = [
   {
     // smooth red dachshund: long low body, short legs, long muzzle, big hanging ears, long low tail, one coat colour
-    id: 'dachshund', name: 'Frank', photo: new URL('./known/dachshund.png', import.meta.url).href,
+    id: 'dachshund', name: 'Frank', photo: new URL('../../../../../assets/dachshund.png', import.meta.url).href,
     traits: {
       bodyLength: 1.15, girth: 0.22, legLength: 0.16, headSize: 0.24, snout: 0.24, earShape: 0, earSize: 1.4, tailLength: 0.33, tailUp: 0.2,
       colors: { base: '#9A4A27', belly: '#B26A3E', ear: '#753419', muzzle: '#A85C34', paws: '#B26A3E', tailTip: '#84401F', nose: '#2A1C18', eye: '#120C0A' },
@@ -16,7 +17,7 @@ export const KNOWN_DOGS: KnownDog[] = [
   },
   {
     // German shepherd: tan coat with a black saddle, black muzzle and tail, tall pointed ears, deep chest, bushy tail carried low
-    id: 'german-shepherd', name: 'Rex', photo: new URL('./known/germanShepherd.png', import.meta.url).href,
+    id: 'german-shepherd', name: 'Rex', photo: new URL('../../../../../assets/germanShepard.png', import.meta.url).href,
     traits: {
       bodyLength: 0.98, girth: 0.28, legLength: 0.3, headSize: 0.25, snout: 0.19, earShape: 1, earSize: 1.45, tailLength: 0.42, tailUp: 0.12, size: 1.3,
       saddle: '#1F1D20',
@@ -25,10 +26,18 @@ export const KNOWN_DOGS: KnownDog[] = [
   },
   {
     // Rottweiler: black coat with tan muzzle and feet, broad head, short muzzle, small folded ears, heavy build, stub tail
-    id: 'rottweiler', name: 'Bruno', photo: new URL('./known/rottweiler.png', import.meta.url).href,
+    id: 'rottweiler', name: 'Bruno', photo: new URL('../../../../../assets/rottweiler.png', import.meta.url).href,
     traits: {
       bodyLength: 0.9, girth: 0.31, legLength: 0.27, headSize: 0.28, snout: 0.14, earShape: 0.08, earSize: 0.8, tailLength: 0.1, tailUp: 0.5, size: 1.15,
       colors: { base: '#2B2526', belly: '#332A28', ear: '#1E1A1A', muzzle: '#B26A32', paws: '#B26A32', tailTip: '#2B2526', nose: '#0C0A0A', eye: '#2A160B' },
+    },
+  },
+  {
+    // yellow Labrador / golden retriever: pale cream coat, lighter chest and feet, hanging ears a shade darker, pinkish-brown nose, athletic build
+    id: 'golden-retriever', name: 'Sunny', photo: new URL('../../../../../assets/goldenRetriever.png', import.meta.url).href,
+    traits: {
+      bodyLength: 0.95, girth: 0.27, legLength: 0.32, headSize: 0.26, snout: 0.17, earShape: 0, earSize: 1, tailLength: 0.36, tailUp: 0.25, size: 1.2,
+      colors: { base: '#EBCB9A', belly: '#F6E6C8', ear: '#D6AA70', muzzle: '#F3E0BF', paws: '#F8ECD6', tailTip: '#E2BB85', nose: '#8A5A50', eye: '#2A160B' },
     },
   },
 ];
